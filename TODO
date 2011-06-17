@@ -1,0 +1,67 @@
+--------------------------------------------------------------
+General
+--------------------------------------------------------------
+? How to deal with complex numbers (see abs,real)
+
+
+--------------------------------------------------------------
+gbpdn.m
+--------------------------------------------------------------
+- Link to pqnLasso.m
+- Fine-tune lassoOptions and callback function
+? How to configure callback function
+? How to deal with Lasso solver status values, when to stop
+  gbpdn based on Lasso status
+? Which formulation to pass to SPG, norm or norm squared
+
+--------------------------------------------------------------
+spgLasso.m
+--------------------------------------------------------------
+- Line search improvements (see TODO)
+- Stopping criteria
+- How to handle complex numbers
+- Check argument count etc.
+- Help comment
+- Date, revision printing
+
+- spgLineCurvy: gamma parameter?
+
+
+--------------------------------------------------------------
+pqnLasso.m
+--------------------------------------------------------------
+
+- Line search!!!
+? See pages 537, 576; Does inherent pos. def. still hold?
+? How to warm-start the Hessian approximation
+- How many variables to use in H
+- Check argument count etc.
+- Default number of iterations
+- Help comment
+- Date, revision printing
+
+
+--------------------------------------------------------------
+To write:
+--------------------------------------------------------------
+
+cvx_mmv(options.solver={sedumi,sdpt3})
+cvx_bp
+cvx_bpdn
+cvx_srbpdn
+
+gbpdn_mmv
+gbpdn_bp
+gbpdn_bpdn
+gbpdn_srbpdn
+--or--
+pqn_mmv      spg_mmv
+pqn_bp       spg_bp
+pqn_bpdn     spg_bpdn
+pqn_srbpdn   spg_srbpdn
+
+sedumi_mmv
+sedumi_bp
+sedumi_bpdn
+sedumi_srbpdn
+&c.
