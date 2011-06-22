@@ -58,6 +58,9 @@ function [x,info] = gbpdn(A,b,tau,sigma,x,options)
 %        .solver       1   Spectral projected gradient (SPG) = default
 %                      2   Projected quadratic Newton (PQN)
 %        .lassoOpts
+%        .rootFinder   newton -> use newton's method (default)
+%                      secant -> use exact secant method (fixed precision solving)
+%                      isecant -> use inexact secant method (variable precision)
 %
 % AUTHORS
 % =======
@@ -65,6 +68,7 @@ function [x,info] = gbpdn(A,b,tau,sigma,x,options)
 %  Michael P. Friedlander (mpf@cs.ubc.ca)
 %    Scientific Computing Laboratory (SCL)
 %    University of British Columbia, Canada.
+%  Aleksandr Aravkin (saravkin@eos.ubc.ca)
 
 %   gbpdn.m
 %   $Id$
@@ -72,9 +76,11 @@ function [x,info] = gbpdn(A,b,tau,sigma,x,options)
 %   ----------------------------------------------------------------------
 %   This file is part of GBPDN (Generalize Basit Pursuit Denoise).
 %
-%   Copyright (C) 2009 Ewout van den Berg and Michael P. Friedlander,
-%   Department of Computer Science, University of British Columbia, Canada.
-%   All rights reserved. E-mail: <{ewout78,mpf}@cs.ubc.ca>.
+%   Copyright (C) 2009-2011 Ewout van den Berg, Michael P. Friedlander,
+%   Department of Computer Science, and Aleksandr Aravkin, Department of
+%   Earth and Ocean Sciences, University of British Columbia, Canada.
+%   All rights reserved. E-mail: <{ewout78,mpf}@cs.ubc.ca>,
+%   <saravkin@eos.ubc.ca>.
 %
 %   GBPDN is free software; you can redistribute it and/or modify it
 %   under the terms of the GNU Lesser General Public License as
@@ -102,7 +108,7 @@ try, t0 = toc; catch, tic, t0 = toc; end;
 
 
 %----------------------------------------------------------------------
-% Check arguments. 
+% Check arguments.
 %----------------------------------------------------------------------
 if ~exist('options','var') || isempty(options), options = struct(); end;
 if ~exist('sigma'  ,'var'), sigma = []; end;
@@ -110,63 +116,64 @@ if ~exist('tau'    ,'var'), tau = []; end;
 if ~exist('x'      ,'var'), x = []; end;
 
 if nargin < 2 || isempty(b) || isempty(A)
-   error('At least two arguments are required');
+    error('At least two arguments are required');
 end
 
 defTol  = 1e-5 * norm(b,2);
 options = setOptions(options, ...
-   'fid'         ,        1 , ...
-   'verbosity'   ,        1 , ...
-   'prefix'      ,       '' , ...  % Prefix for formatting output
-   'iterations'  ,       10 , ...
-   'tolerance'   ,   defTol , ...
-   'maxMatvec'   ,      Inf , ...
-   'maxRuntime'  ,      Inf , ...
-   'solver'      ,        1 , ...
-   'project'     ,       [] , ...
-   'kappa'       ,       [] , ...
-   'kappa_polar' ,       [] , ...
-   'lassoOpts'   , struct() ...
-);
+    'fid'         ,        1 , ...
+    'verbosity'   ,        1 , ...
+    'prefix'      ,       '' , ...  % Prefix for formatting output
+    'iterations'  ,       100 , ...
+    'tolerance'   ,   defTol , ...
+    'maxMatvec'   ,      Inf , ...
+    'maxRuntime'  ,      Inf , ...
+    'solver'      ,        1 , ...
+    'project'     ,       [] , ...
+    'kappa'       ,       [] , ...
+    'kappa_polar' ,       [] , ...
+    'lassoOpts'   , struct() , ...
+    'rootFinder'  ,  'newton' ...
+    );
 
 % Make tolerance two sided if needed.
 if isscalar(options.tolerance)
-   options.tolerance = [1 1] * options.tolerance;
+    options.tolerance = [1 1] * options.tolerance;
 end
 
 % Check kappa related options.
 flags = [isempty(options.project), ...
-         isempty(options.kappa)  , ...
-         isempty(options.kappa_polar)];
+    isempty(options.kappa)  , ...
+    isempty(options.kappa_polar)];
 if any(flags) && ~all(flags)
-   error(['Either all kappa related fields (kappa, kappa_polar, ' ...
-          'project) should be given or none.']);
+    error(['Either all kappa related fields (kappa, kappa_polar, ' ...
+        'project) should be given or none.']);
 end
 if all(flags)
-   options.project     = @(x,tau) NormL1_project(x,1,tau);
-   options.kappa       = @(x)     NormL1_primal(x,1);
-   options.kappa_polar = @(x)     NormL1_dual(x,1);
+    options.project     = @(x,tau) NormL1_project(x,1,tau);
+    options.kappa       = @(x)     NormL1_primal(x,1);
+    options.kappa_polar = @(x)     NormL1_dual(x,1);
 end
 
 % Match tau and x0.
 if ~isempty(x)
-   if isempty(tau)
-      tau = options.kappa(x);
-   else
-      x = project(x,tau);
-   end   
+    if isempty(tau)
+        tau = options.kappa(x);
+    else
+        x = project(x,tau);
+    end
 end
 
 % Determine solver mode.
 if isempty(tau) && isempty(sigma)
-   tau       = 0;
-   sigma     = 0;
-   singleTau = false;  
+    tau       = 0;
+    sigma     = 0;
+    singleTau = false;
 elseif isempty(sigma)
-   singleTau = true;
+    singleTau = true;
 else % Empty tau
-   tau       = 0;
-   singleTau = false;
+    tau       = 0;
+    singleTau = false;
 end
 
 %----------------------------------------------------------------------
@@ -187,19 +194,20 @@ maxRuntime   = options.maxRuntime;
 f            = -1; % Objective (needed when dealing with matvec error)
 tauHist      = [];
 lambdaHist   = [];
+fHist        = []; % needed for secant method
 
 % Determine problem size. (May need nProdA and nProdAt)
 explicit = ~(isa(A,'function_handle'));
 if isempty(x)
-   if explicit
-      n = size(A,2);
-   else
-      x = Aprod(b,2);
-      n = length(x);
-   end
-   x = zeros(n,1);
+    if explicit
+        n = size(A,2);
+    else
+        x = Aprod(b,2);
+        n = length(x);
+    end
+    x = zeros(n,1);
 else
-   n = length(x);
+    n = length(x);
 end
 m = length(b);
 
@@ -223,29 +231,29 @@ data.kappa_polar = options.kappa_polar;
 
 % Choose solver and set options
 switch options.solver
-  case 1,
-     lassoOpts = setOptions(options.lassoOpts, ...
-           'verbosity' , max(0,options.verbosity - 1), ...
-           'iterations',   1e5, ...
-           'optTol'    ,  1e-6);
-     lassoOpts.prefix     = [options.prefix, '  |'];
-     lassoOpts.callback   = @funCallback;
-
-     funLasso = @spgLasso;
-     solver   = 'SPG Solver';
-  case 2,
-     lassoOpts = setOptions(options.lassoOpts, ...
-           'verbosity' , max(0,options.verbosity - 1), ...
-           'iterations',   1e5, ...
-           'optTol'    ,  1e-6);
-     lassoOpts.prefix     = [options.prefix, '  >'];
-     lassoOpts.callback   = @funCallback;
-
-     funLasso = @pqnLasso;
-     solver   = 'PQN Solver';
-
- otherwise
-     error('Unknown solver in options.');
+    case 1,
+        lassoOpts = setOptions(options.lassoOpts, ...
+            'verbosity' , max(0,options.verbosity - 1), ...
+            'iterations',   1e5, ...
+            'optTol'    ,  1e-6);
+        lassoOpts.prefix     = [options.prefix, '  |'];
+        lassoOpts.callback   = @funCallback;
+        
+        funLasso = @spgLasso;
+        solver   = 'SPG Solver';
+    case 2,
+        lassoOpts = setOptions(options.lassoOpts, ...
+            'verbosity' , max(0,options.verbosity - 1), ...
+            'iterations',   1e5, ...
+            'optTol'    ,  1e-6);
+        lassoOpts.prefix     = [options.prefix, '  >'];
+        lassoOpts.callback   = @funCallback;
+        
+        funLasso = @pqnLasso;
+        solver   = 'PQN Solver';
+        
+    otherwise
+        error('Unknown solver in options.');
 end
 
 
@@ -265,21 +273,21 @@ printf(' %-22s: %8.2e      %-22s: %s\n'   ,'Two-norm of b',bNorm,'Solver',solver
 % ----------------------------------------------------------------------
 % Set log format and output header
 if options.verbosity ~= 0
-   logB = ' %-4d  %13.7e  %13.7e  %-30s\n';
-   logH = '%4s  %-13s  %-13s  %-30s';
-   logS = sprintf(logH,'Iter','Objective','Parameter','Solver message');
-   printf('\n');
-   
-   if options.verbosity == 1
-      printf(' %s\n',logS);
-   else
-      bar  = repmat('=',length(logS),1);
-      pref = options.prefix;
-      logB = sprintf(' %s\n%s %s\n%s%s%s %s\n',...
-                bar,pref,logS,pref,logB,pref,bar);
-   end
+    logB = ' %-4d  %13.7e  %13.7e  %-30s\n';
+    logH = '%4s  %-13s  %-13s  %-30s';
+    logS = sprintf(logH,'Iter','Objective','Parameter','Solver message');
+    printf('\n');
+    
+    if options.verbosity == 1
+        printf(' %s\n',logS);
+    else
+        bar  = repmat('=',length(logS),1);
+        pref = options.prefix;
+        logB = sprintf(' %s\n%s %s\n%s%s%s %s\n',...
+            bar,pref,logS,pref,logB,pref,bar);
+    end
 else
-   logB = '';
+    logB = '';
 end
 
 
@@ -287,65 +295,79 @@ end
 % Quick exit if sigma >= ||b||.  Set tau = 0 to short-circuit the loop.
 % ----------------------------------------------------------------------
 if bNorm <= sigma
-   tau = 0;  sigma = [];
-end 
+    tau = 0;  sigma = [];
+end
 
 
 % ----------------------------------------------------------------------
 % Main loop
 % ----------------------------------------------------------------------
 while 1
-   % Evaluate Pareto function and compute gradient
-   try
-
-      data.tau   = tau;
-      data.sigma = sigma;
-      funProject = @(z) project(z,tau);
-      lassoOpts.maxRuntime = maxRuntime - (toc - t0);
-      [x,info,data] = funLasso(@funObjective,funProject,x,lassoOpts,data);
-      f = data.rNorm;
-      g = -options.kappa_polar(data.Atr / data.rNorm);
-   catch
-      err = lasterror;
-      if strcmp(err.identifier,'GBPDN:MaximumMatvec')
-         stat = EXIT_MATVEC_LIMIT;
-         iter = iter - 1;
-         info.stat    = 0;
-         info.statMsg = '---ABORTED BY GPBDN---';
-       else
-         rethrow(err);
-       end
-   end
-
-   % Output log
-   printf(logB,iter,f,tau,info.statMsg);
-
-   % Check exit conditions
-   if (toc - t0) >= maxRuntime
-      stat = EXIT_RUNTIME_LIMIT;
-   end
-   if iter >= options.iterations
-      stat = EXIT_ITERATIONS;
-   end
-   if ischar(info.stat)
-      stat    = EXIT_ERROR;
-      statMsg = info.stat;
-   else
-      if isempty(sigma) || ...
-         (((f - sigma) <= options.tolerance(1)) && ...
-          ((sigma - f) <= options.tolerance(2)))
-         stat = EXIT_OPTIMAL;
-      end
-   end
-   if ~isempty(stat), break; end;
-
-   % Take Newton step.
-   tauHist    = [tauHist, tau];
-   lambdaHist = [lambdaHist, -g * data.rNorm];
-
-   tau  = tau - (f - sigma) / g;
-   iter = iter + 1;
-   
+    % Evaluate Pareto function and compute gradient
+    try
+        
+        data.tau   = tau;
+        data.sigma = sigma;
+        funProject = @(z) project(z,tau);
+        lassoOpts.maxRuntime = maxRuntime - (toc - t0);
+        [x,info,data] = funLasso(@funObjective,funProject,x,lassoOpts,data);
+        f = data.rNorm;
+        g = -options.kappa_polar(data.Atr / data.rNorm);
+    catch
+        err = lasterror;
+        if strcmp(err.identifier,'GBPDN:MaximumMatvec')
+            stat = EXIT_MATVEC_LIMIT;
+            iter = iter - 1;
+            info.stat    = 0;
+            info.statMsg = '---ABORTED BY GPBDN---';
+        else
+            rethrow(err);
+        end
+    end
+    
+    % Output log
+    printf(logB,iter,f,tau,info.statMsg);
+    
+    % Check exit conditions
+    if (toc - t0) >= maxRuntime
+        stat = EXIT_RUNTIME_LIMIT;
+    end
+    if iter >= options.iterations
+        stat = EXIT_ITERATIONS;
+    end
+    if ischar(info.stat)
+        stat    = EXIT_ERROR;
+        statMsg = info.stat;
+    else
+        if isempty(sigma) || ...
+                (((f - sigma) <= options.tolerance(1)) && ...
+                ((sigma - f) <= options.tolerance(2)))
+            stat = EXIT_OPTIMAL;
+        end
+    end
+    if ~isempty(stat), break; end;
+    
+    % Take Newton step.
+    tauHist    = [tauHist, tau];
+    lambdaHist = [lambdaHist, -g * data.rNorm];
+    fHist = [fHist, 0.5*f^2]; % needed for secant method
+    
+    
+    switch options.rootFinder
+        case{'newton'}
+            tau  = tau - (f - sigma) / g;
+        case{'secant'}
+            if(iter == 1)
+                tau  = tau - (f - sigma) / g;
+            else
+                slope = (fHist(end) - fHist(end - 1))/(tauHist(end) - tauHist(end - 1));
+                tau = tau - (fHist(end) - 0.5*sigma^2)/(slope);
+            end
+        otherwise
+            err('unknown root finding method')
+    end
+    iter = iter + 1;
+    
 end
 % ----------------------------------------------------------------------
 % End of main loop
@@ -371,29 +393,29 @@ info.lambdaHist   = [lambdaHist, -g * data.rNorm];
 
 % Print final output.
 switch (stat)
-   case EXIT_OPTIMAL
-      info.statMsg = 'Optimal solution found';
-   case EXIT_ITERATIONS
-      info.statMsg = 'Too many iterations';
-   case EXIT_MATVEC_LIMIT
-      info.statMsg = 'Maximum matrix-vector operations reached';
-   case EXIT_RUNTIME_LIMIT
-      info.statMsg = 'Maximum runtime reached';
-   case EXIT_ERROR
-      info.statMsg = sprintf('Lasso error: %s', statMsg);
-   otherwise
-      info.statMsg = 'Unknown termination condition';
+    case EXIT_OPTIMAL
+        info.statMsg = 'Optimal solution found';
+    case EXIT_ITERATIONS
+        info.statMsg = 'Too many iterations';
+    case EXIT_MATVEC_LIMIT
+        info.statMsg = 'Maximum matrix-vector operations reached';
+    case EXIT_RUNTIME_LIMIT
+        info.statMsg = 'Maximum runtime reached';
+    case EXIT_ERROR
+        info.statMsg = sprintf('Lasso error: %s', statMsg);
+    otherwise
+        info.statMsg = 'Unknown termination condition';
 end
 
 printf('\n');
 printf(' EXIT -- %s\n', info.statMsg)
 printf('\n');
 printf(' %-20s:  %6i %6s %-20s:  %6.1f\n',...
-   'Products with A',nProdA,'','Total time   (secs)',info.timeTotal);
+    'Products with A',nProdA,'','Total time   (secs)',info.timeTotal);
 printf(' %-20s:  %6i %6s %-20s:  %6.1f\n',...
-   'Products with A''',nProdAt,'','Project time (secs)',timeProject);
+    'Products with A''',nProdAt,'','Project time (secs)',timeProject);
 printf(' %-20s:  %6i %6s %-20s:  %6.1f\n',...
-   'Newton iterations',info.iter,'','Mat-vec time (secs)',timeMatProd);
+    'Newton iterations',info.iter,'','Mat-vec time (secs)',timeMatProd);
 
 
 
@@ -402,50 +424,50 @@ printf(' %-20s:  %6i %6s %-20s:  %6.1f\n',...
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % ----------------------------------------------------------------------
-function z = Aprod(x,mode)
-% ----------------------------------------------------------------------
-   if (nProdA + nProdAt >= maxMatvec)
-     error('GBPDN:MaximumMatvec','');
-   end
-     
-   tStart = toc;
-   if mode == 1
-      nProdA = nProdA + 1;
-      if   explicit, z = A*x;
-      else           z = A(x,1);
-      end
-   elseif mode == 2
-      nProdAt = nProdAt + 1;
-      if   explicit, z = A'*x;
-      else           z = A(x,2);
-      end
-   else
-      error('Wrong mode!');
-   end
-   timeMatProd = timeMatProd + (toc - tStart);
-end % function Aprod
+    function z = Aprod(x,mode)
+        % ----------------------------------------------------------------------
+        if (nProdA + nProdAt >= maxMatvec)
+            error('GBPDN:MaximumMatvec','');
+        end
+        
+        tStart = toc;
+        if mode == 1
+            nProdA = nProdA + 1;
+            if   explicit, z = A*x;
+            else           z = A(x,1);
+            end
+        elseif mode == 2
+            nProdAt = nProdAt + 1;
+            if   explicit, z = A'*x;
+            else           z = A(x,2);
+            end
+        else
+            error('Wrong mode!');
+        end
+        timeMatProd = timeMatProd + (toc - tStart);
+    end % function Aprod
 
 
 % ----------------------------------------------------------------------
-function printf(varargin)
-% ----------------------------------------------------------------------
-  if options.verbosity > 0
-     fprintf(options.fid,options.prefix);
-     fprintf(options.fid,varargin{:});
-  end
-end % function printf
+    function printf(varargin)
+        % ----------------------------------------------------------------------
+        if options.verbosity > 0
+            fprintf(options.fid,options.prefix);
+            fprintf(options.fid,varargin{:});
+        end
+    end % function printf
 
 
 % ----------------------------------------------------------------------
-function x = project(x, tau)
-% ----------------------------------------------------------------------
-   tStart      = toc;
-
-   x = options.project(x,tau);
-   
-   timeProject  = timeProject + (toc - tStart);
-   nProjections = nProjections + 1;
-end % function project
+    function x = project(x, tau)
+        % ----------------------------------------------------------------------
+        tStart      = toc;
+        
+        x = options.project(x,tau);
+        
+        timeProject  = timeProject + (toc - tStart);
+        nProjections = nProjections + 1;
+    end % function project
 
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -469,9 +491,9 @@ function [f,varargout] = funObjective(x,varargin)
 
 % Initialize data
 if nargin > 1
-   data = varargin{1};
+    data = varargin{1};
 else
-   data = struct();
+    data = struct();
 end;
 
 % Compute f
@@ -482,15 +504,15 @@ f          = data.f;
 
 % Compute gradient (optional)
 if nargout == 3
-   data.Atr     = data.Aprod(data.r,2);
-   varargout{1} = -data.Atr; % gradient
+    data.Atr     = data.Aprod(data.r,2);
+    varargout{1} = -data.Atr; % gradient
 else
-   data.Atr = [];
+    data.Atr = [];
 end
 
 % Output data
 if nargout > 1
-   varargout{nargout-1} = data;
+    varargout{nargout-1} = data;
 end
 
 end % function funObjective
@@ -505,13 +527,13 @@ stat = 0;
 
 % Compute primal dual gap (in quadratic formulation)
 if ~isempty(data.Atr)
-   gNorm = data.kappa_polar(data.Atr);
-   gap   = data.r'*(data.r - data.b) + data.tau*gNorm;
-   rGap  = abs(gap) / max(1,data.f);
-   
-   if rGap <= 1e-5 % TODO
-      stat = 1;
-   end     
+    gNorm = data.kappa_polar(data.Atr);
+    gap   = data.r'*(data.r - data.b) + data.tau*gNorm;
+    rGap  = abs(gap) / max(1,data.f);
+    
+    if rGap <= 1e-10 % TODO
+        stat = 1;
+    end
 end
 
 
