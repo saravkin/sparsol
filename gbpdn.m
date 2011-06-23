@@ -194,7 +194,7 @@ maxRuntime   = options.maxRuntime;
 f            = -1; % Objective (needed when dealing with matvec error)
 tauHist      = [tau];
 lambdaHist   = [];
-fHist        = []; % needed for secant method
+fHist        = [0.5*bNorm^2]; % needed for secant method
 dHist        = []; % needed for secant method
 
 % Determine problem size. (May need nProdA and nProdAt)
@@ -230,11 +230,15 @@ data.r           = []; % For dealing with matvec error in first call
 data.Aprod       = @Aprod;
 data.kappa_polar = options.kappa_polar;
 data.iter        = 0; % needed for secant callback
+data.dualSol     = 0; % needed for secant callback
 
 
 usingNewton = strcmp(options.rootFinder, 'newton'); % for newton-only options
 
 % Choose solver and set options
+
+
+
 
 
 switch options.solver
@@ -244,11 +248,6 @@ switch options.solver
             'iterations',   1e5, ...
             'optTol'    ,  1e-6);
         lassoOpts.prefix     = [options.prefix, '  |'];
-        if(usingNewton)
-            lassoOpts.callback   = @funCallbackNewton;
-        else
-            lassoOpts.callback   = @funCallbackSecant;
-        end
         
         funLasso = @spgLasso;
         solver   = 'SPG Solver';
@@ -258,17 +257,24 @@ switch options.solver
             'iterations',   1e5, ...
             'optTol'    ,  1e-6);
         lassoOpts.prefix     = [options.prefix, '  >'];
-        if(usingNewton)
-            lassoOpts.callback   = @funCallbackNewton;
-        else
-            lassoOpts.callback   = @funCallbackSecant;
-        end
-        
+               
         funLasso = @pqnLasso;
         solver   = 'PQN Solver';
         
     otherwise
         error('Unknown solver in options.');
+end
+
+switch options.rootFinder
+    case {'newton'}
+        lassoOpts.callback   = @funCallbackNewton;
+    case{'secant'}
+        lassoOpts.callback   = @funCallbackSecant;
+        
+    case{'isecant'}
+        lassoOpts.callback   = @funCallbackInexactSecant;
+    otherwise
+        error('Unknown root finder');
 end
 
 
@@ -288,9 +294,9 @@ printf(' %-22s: %8.2e      %-22s: %s\n'   ,'Two-norm of b',bNorm,'Solver',solver
 % ----------------------------------------------------------------------
 % Set log format and output header
 if options.verbosity ~= 0
-    logB = ' %4d  %13.7e %13.7e %13.7e  %13d  %-10s\n';
-    logH = '%4s  %-13s  %-15s %-13s   %-15s';
-    logS = sprintf(logH,'Iter','Objective','Dual Objective', 'Parameter','Subsolver its','Subsolver message');
+    logB = ' %4d  %13.7e %13.7e   %13d  %-30s\n';
+    logH = '%4s  %-13s  %-15s   %-30s';
+    logS = sprintf(logH,'Iter','Objective', 'Parameter','Subsolver its','Subsolver message');
     printf('\n');
     
     if options.verbosity == 1
@@ -324,17 +330,21 @@ while 1
     try
         data.iter = iter;
         data.tauOld = tauHist(end);
+        data.fOld   = fHist(end);
         data.tau    = tau;
         data.sigma  = sigma;
         funProject  = @(z) project(z,tau);
         lassoOpts.maxRuntime = maxRuntime - (toc - t0);
         [x,info,data] = funLasso(@funObjective,funProject,x,lassoOpts,data);
         f = data.rNorm;
+        dualSol = 0.5*norm(data.b)^2 - 0.5*norm(data.r - data.b)^2 - tau*norm(data.Atr, inf);
+        data.dualSol = dualSol; % needed by secant method
+        
         if(usingNewton || iter == 1)
             g = -options.kappa_polar(data.Atr / data.rNorm);
         end
-%        dualSol = 0.5*norm(data.r - data.b,2)^2 + tau*norm(data.Atr, inf);
-         dualSol = 0.5*norm(data.b)^2 - 0.5*norm(data.r - data.b)^2 - tau*norm(data.Atr, inf);
+        %        dualSol = 0.5*norm(data.r - data.b,2)^2 + tau*norm(data.Atr, inf);
+        
     catch
         err = lasterror;
         if strcmp(err.identifier,'GBPDN:MaximumMatvec')
@@ -348,7 +358,7 @@ while 1
     end
     
     % Output log
-    printf(logB,iter,0.5*f^2, dualSol,tau,info.iter,info.statMsg);
+    printf(logB,iter,f,tau,info.iter,info.statMsg);
     
     % Check exit conditions
     if (toc - t0) >= maxRuntime
@@ -371,10 +381,10 @@ while 1
     
     % Take Newton step.
     tauHist    = [tauHist, tau];
-
+    
     if(usingNewton)
         lambdaHist = [lambdaHist, -g * data.rNorm];
-    else    
+    else
         fHist = [fHist, 0.5*f^2]; % needed for secant method
         dHist = [dHist, dualSol];
     end
@@ -387,16 +397,16 @@ while 1
             if(iter == 1)
                 tau  = tau - (f - sigma) / g;
             else
-                dtau = tauHist(end) - tauHist(end - 1); 
-                slope = (fHist(end) - fHist(end - 1))/dtau; 
-                tau = tau - (fHist(end) - 0.5*sigma^2)/(slope); 
+                dtau = tauHist(end) - tauHist(end - 1);
+                slope = (fHist(end) - fHist(end - 1))/dtau;
+                tau = tau - (fHist(end) - 0.5*sigma^2)/(slope);
             end
             
         case{'isecant'}
             if(iter == 1)
                 tau  = tau - (f - sigma) / g;
             else
-                dtau = tauHist(end) - tauHist(end - 1); 
+                dtau = tauHist(end) - tauHist(end - 1);
                 slope = (dHist(end) - fHist(end - 1))/dtau; % using dual solution
                 tau = tau - (dHist(end) - 0.5*sigma^2)/(slope); %using dual solution
             end
@@ -556,6 +566,35 @@ end % function funObjective
 
 
 % ----------------------------------------------------------------------
+function [stat,data] = funCallbackInexactSecant(x,data)
+% ----------------------------------------------------------------------
+
+% Default output
+stat = 0;
+
+% Compute primal dual gap (in quadratic formulation)
+if ~isempty(data.Atr)
+    gNorm = data.kappa_polar(data.Atr);
+    gap   = data.r'*(data.r - data.b) + data.tau*gNorm;
+    rGap  = abs(gap) / max(1,data.f);
+    
+    tau    = data.tau;
+    tauOld = data.tauOld;
+    fOld   = data.fOld;
+    dualSol = data.dualSol;
+    
+    
+    
+    if (rGap <= 1e-5*(tau - tauOld)) && (dualSol <= fOld - 1e-5)
+        stat = 1;
+    end
+end
+
+
+end % function funCallbackInexactSecant
+
+
+% ----------------------------------------------------------------------
 function [stat,data] = funCallbackSecant(x,data)
 % ----------------------------------------------------------------------
 
@@ -571,13 +610,14 @@ if ~isempty(data.Atr)
     tau    = data.tau;
     tauOld = data.tauOld;
     
-    if rGap <= (1e-6*(tau - tauOld))/(data.iter + 1)^2 % TODO
+    
+    if rGap <= 1e-5*(tau - tauOld)
         stat = 1;
     end
 end
 
 
-end % function funCallback
+end % function funCallbackSecant
 
 % ----------------------------------------------------------------------
 function [stat,data] = funCallbackNewton(x,data)
@@ -598,4 +638,4 @@ if ~isempty(data.Atr)
 end
 
 
-end % function funCallback
+end % function funCallbackNewton

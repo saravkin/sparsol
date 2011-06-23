@@ -6,7 +6,7 @@ m = 120; n = 512; k = 20; % m rows, n cols, k nonzeros.
     b  = A*x0 + 0.005 * randn(m,1);
     
     options.lassoOpts.optTol = 1e-10;
-    options.tolerance = 1e-5*norm(b);
+    options.tolerance = 1e-7*norm(b);
     
     options.rootFinder = 'newton';  
     [xNewton,info] = gbpdn(A, b, 0, 1e-8, [], options); % Find BP sol'n.
@@ -15,4 +15,4 @@ m = 120; n = 512; k = 20; % m rows, n cols, k nonzeros.
     [xSecant,info] = gbpdn(A, b, 0, 1e-8, [], options); % Find BP sol'n.
     
       options.rootFinder = 'isecant';     
-    [xSecant,info] = gbpdn(A, b, 0, 1e-8, [], options); % Find BP sol'n.
+    [xInexactSecant,info] = gbpdn(A, b, 0, 1e-8, [], options); % Find BP sol'n.
