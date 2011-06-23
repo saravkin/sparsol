@@ -192,7 +192,7 @@ bNorm        = norm(b,2);
 maxMatvec    = options.maxMatvec;
 maxRuntime   = options.maxRuntime;
 f            = -1; % Objective (needed when dealing with matvec error)
-tauHist      = [];
+tauHist      = [tau];
 lambdaHist   = [];
 fHist        = []; % needed for secant method
 
@@ -273,9 +273,9 @@ printf(' %-22s: %8.2e      %-22s: %s\n'   ,'Two-norm of b',bNorm,'Solver',solver
 % ----------------------------------------------------------------------
 % Set log format and output header
 if options.verbosity ~= 0
-    logB = ' %-4d  %13.7e  %13.7e  %-30s\n';
-    logH = '%4s  %-13s  %-13s  %-30s';
-    logS = sprintf(logH,'Iter','Objective','Parameter','Solver message');
+    logB = ' %4d  %13.7e  %13.7e  %13d  %-30s\n';
+    logH = '%4s  %-13s  %-13s  %13s  %-30s';
+    logS = sprintf(logH,'Iter','Objective','Parameter','Subsolver its','Subsolver message');
     printf('\n');
     
     if options.verbosity == 1
@@ -305,10 +305,10 @@ end
 while 1
     % Evaluate Pareto function and compute gradient
     try
-        
-        data.tau   = tau;
-        data.sigma = sigma;
-        funProject = @(z) project(z,tau);
+        data.tauOld = tauHist(end);
+        data.tau    = tau;
+        data.sigma  = sigma;
+        funProject  = @(z) project(z,tau);
         lassoOpts.maxRuntime = maxRuntime - (toc - t0);
         [x,info,data] = funLasso(@funObjective,funProject,x,lassoOpts,data);
         f = data.rNorm;
@@ -326,7 +326,7 @@ while 1
     end
     
     % Output log
-    printf(logB,iter,f,tau,info.statMsg);
+    printf(logB,iter,f,tau,info.iter,info.statMsg);
     
     % Check exit conditions
     if (toc - t0) >= maxRuntime
@@ -360,7 +360,8 @@ while 1
             if(iter == 1)
                 tau  = tau - (f - sigma) / g;
             else
-                slope = (fHist(end) - fHist(end - 1))/(tauHist(end) - tauHist(end - 1));
+                dtau = tauHist(end) - tauHist(end - 1);
+                slope = (fHist(end) - fHist(end - 1))/dtau;
                 tau = tau - (fHist(end) - 0.5*sigma^2)/(slope);
             end
         otherwise
@@ -531,6 +532,9 @@ if ~isempty(data.Atr)
     gap   = data.r'*(data.r - data.b) + data.tau*gNorm;
     rGap  = abs(gap) / max(1,data.f);
     
+    tau    = data.tau;
+    tauOld = data.tauOld;
+
     if rGap <= 1e-10 % TODO
         stat = 1;
     end
