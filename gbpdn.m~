@@ -229,7 +229,6 @@ data.b           = b;
 data.r           = []; % For dealing with matvec error in first call
 data.Aprod       = @Aprod;
 data.kappa_polar = options.kappa_polar;
-data.iter        = 0; % needed for secant callback
 
 
 usingNewton = strcmp(options.rootFinder, 'newton'); % for newton-only options
@@ -322,7 +321,6 @@ end
 while 1
     % Evaluate Pareto function and compute gradient
     try
-        data.iter = iter;
         data.tauOld = tauHist(end);
         data.tau    = tau;
         data.sigma  = sigma;
@@ -334,7 +332,7 @@ while 1
             g = -options.kappa_polar(data.Atr / data.rNorm);
         end
 %        dualSol = 0.5*norm(data.r - data.b,2)^2 + tau*norm(data.Atr, inf);
-         dualSol = 0.5*norm(data.b)^2 - 0.5*norm(data.r - data.b)^2 - tau*norm(data.Atr, inf);
+         dualSol = 0.5*norm(data.b,2)^2 - 0.5*no
     catch
         err = lasterror;
         if strcmp(err.identifier,'GBPDN:MaximumMatvec')
@@ -387,18 +385,9 @@ while 1
             if(iter == 1)
                 tau  = tau - (f - sigma) / g;
             else
-                dtau = tauHist(end) - tauHist(end - 1); 
-                slope = (fHist(end) - fHist(end - 1))/dtau; 
-                tau = tau - (fHist(end) - 0.5*sigma^2)/(slope); 
-            end
-            
-        case{'isecant'}
-            if(iter == 1)
-                tau  = tau - (f - sigma) / g;
-            else
-                dtau = tauHist(end) - tauHist(end - 1); 
-                slope = (dHist(end) - fHist(end - 1))/dtau; % using dual solution
-                tau = tau - (dHist(end) - 0.5*sigma^2)/(slope); %using dual solution
+                dtau = dHist(end) - tauHist(end - 1); % using dual solution
+                slope = (fHist(end) - fHist(end - 1))/dtau;
+                tau = tau - (dHist(end) - 0.5*sigma^2)/(slope);
             end
         otherwise
             err('unknown root finding method')
@@ -571,7 +560,7 @@ if ~isempty(data.Atr)
     tau    = data.tau;
     tauOld = data.tauOld;
     
-    if rGap <= (1e-6*(tau - tauOld))/(data.iter + 1)^2 % TODO
+    if rGap <= 1e-5*(tau - tauOld) % TODO
         stat = 1;
     end
 end
