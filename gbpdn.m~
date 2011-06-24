@@ -340,8 +340,10 @@ while 1
            g = -options.kappa_polar(data.Atr); % SASHA: deleted /data.rNorm
         end
         if ~usingNewton
-           dVal = dualObjVal(b, data.r, data.Atr, tau);
-           dVal = max(0, dVal);   % No sense in allowing neg lower bound
+           dVal2 = dualObjVal(b, data.r, data.Atr, tau);
+           dVal2 = max(0, dVal2);   % No sense in allowing neg lower bound
+           dVal  = sqrt(dVal2);     % dVal2 may be negative; safeguard
+%          dVal  = max(sigma,dVal); % Don't allow lower bnd lower than sigma
            data.dVal = dVal;
         end
         
@@ -640,7 +642,7 @@ end % function funCallbackNewton
 % ----------------------------------------------------------------------
 function dVal = dualObjVal(b, r, Atr, tau)
 % ----------------------------------------------------------------------
-% SASHA: changed dVal (divided by 2).
+%
 dVal = 0.5*norm(b)^2 - 0.5*norm(r - b)^2 - tau*norm(Atr, inf);   
 end
 % ----------------------------------------------------------------------

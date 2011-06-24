@@ -23,5 +23,5 @@ fprintf('Target tau = %15.7e\n', tau);
 
 %% Inexact secant
 options.rootFinder = 'isecant';
-[xInexactSecant,info] = gbpdn(A, b, 0, 1e-3, [], options); % Find BP sol'n.
+[xInexactSecant,info] = gbpdn(A, b, 0, 1e-8, [], options); % Find BP sol'n.
 fprintf('Target tau = %15.7e\n', tau);
