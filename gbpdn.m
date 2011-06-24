@@ -194,7 +194,7 @@ maxRuntime   = options.maxRuntime;
 f            = -1; % Objective (needed when dealing with matvec error)
 tauHist      = [tau];
 lambdaHist   = [];
-fHist        = [0.5*bNorm^2]; % needed for secant method
+fHist        = [bNorm]; % needed for secant method
 dHist        = []; % needed for secant method
 
 % Determine problem size. (May need nProdA and nProdAt)
@@ -337,7 +337,7 @@ while 1
         lassoOpts.maxRuntime = maxRuntime - (toc - t0);
         [x,info,data] = funLasso(@funObjective,funProject,x,lassoOpts,data);
         f = data.rNorm;
-        dualSol = 0.5*norm(data.b)^2 - 0.5*norm(data.r - data.b)^2 - tau*norm(data.Atr, inf);
+        dualSol = sqrt(norm(data.b)^2 - norm(data.r - data.b)^2 - 2*tau*norm(data.Atr, inf)); %sqrt of 2*dual solution
         data.dualSol = dualSol; % needed by secant method
         
         if(usingNewton || iter == 1)
@@ -385,7 +385,7 @@ while 1
     if(usingNewton)
         lambdaHist = [lambdaHist, -g * data.rNorm];
     else
-        fHist = [fHist, 0.5*f^2]; % needed for secant method
+        fHist = [fHist, f]; % needed for secant method
         dHist = [dHist, dualSol];
     end
     
@@ -399,7 +399,7 @@ while 1
             else
                 dtau = tauHist(end) - tauHist(end - 1);
                 slope = (fHist(end) - fHist(end - 1))/dtau;
-                tau = tau - (fHist(end) - 0.5*sigma^2)/(slope);
+                tau = tau - (fHist(end) - sigma)/(slope);
             end
             
         case{'isecant'}
@@ -408,7 +408,7 @@ while 1
             else
                 dtau = tauHist(end) - tauHist(end - 1);
                 slope = (dHist(end) - fHist(end - 1))/dtau; % using dual solution
-                tau = tau - (dHist(end) - 0.5*sigma^2)/(slope); %using dual solution
+                tau = tau - (dHist(end) - sigma)/(slope); %using dual solution
             end
         otherwise
             err('unknown root finding method')
@@ -585,7 +585,7 @@ if ~isempty(data.Atr)
     
     
     
-    if (rGap <= 1e-5*(tau - tauOld)) && (dualSol <= fOld - 1e-5)
+    if (rGap <= 1e-5*(tau - tauOld)) && (dualSol <= fOld)
         stat = 1;
     end
 end
