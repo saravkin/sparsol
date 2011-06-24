@@ -230,7 +230,7 @@ data.r           = []; % For dealing with matvec error in first call
 data.Aprod       = @Aprod;
 data.kappa_polar = options.kappa_polar;
 data.iter        = 0; % needed for secant callback
-data.dualSol     = 0; % needed for secant callback
+data.dVal        = 0; % needed for secant callback
 
 
 usingNewton = strcmp(options.rootFinder, 'newton'); % for newton-only options
@@ -294,9 +294,9 @@ printf(' %-22s: %8.2e      %-22s: %s\n'   ,'Two-norm of b',bNorm,'Solver',solver
 % ----------------------------------------------------------------------
 % Set log format and output header
 if options.verbosity ~= 0
-    logB = ' %4d  %13.7e %13.7e   %13d  %-30s\n';
-    logH = '%4s  %-13s  %-15s   %-30s';
-    logS = sprintf(logH,'Iter','Objective', 'Parameter','Subsolver its','Subsolver message');
+    logB = ' %4d  %13.7e  %13.7e  %7d  %-30s\n';
+    logH = '%4s  %-13s  %-13s  %7s  %-30s';
+    logS = sprintf(logH,'Iter','Objective','Parameter','Min Its','MinExit');
     printf('\n');
     
     if options.verbosity == 1
@@ -319,16 +319,13 @@ if bNorm <= sigma
     tau = 0;  sigma = [];
 end
 
-
-
-
 % ----------------------------------------------------------------------
 % Main loop
 % ----------------------------------------------------------------------
 while 1
     % Evaluate Pareto function and compute gradient
     try
-        data.iter = iter;
+        data.iter   = iter;
         data.tauOld = tauHist(end);
         data.fOld   = fHist(end);
         data.tau    = tau;
@@ -337,13 +334,17 @@ while 1
         lassoOpts.maxRuntime = maxRuntime - (toc - t0);
         [x,info,data] = funLasso(@funObjective,funProject,x,lassoOpts,data);
         f = data.rNorm;
-        dualSol = sqrt(norm(data.b)^2 - norm(data.r - data.b)^2 - 2*tau*norm(data.Atr, inf)); %sqrt of 2*dual solution
-        data.dualSol = dualSol; % needed by secant method
         
-        if(usingNewton || iter == 1)
-            g = -options.kappa_polar(data.Atr / data.rNorm);
+        if usingNewton || iter == 1
+           g = -options.kappa_polar(data.Atr / data.rNorm);
         end
-        %        dualSol = 0.5*norm(data.r - data.b,2)^2 + tau*norm(data.Atr, inf);
+        if ~usingNewton
+           dVal2 = dualObjVal(b, data.r, data.Atr, tau);
+           dVal2 = max(0, dVal2);   % No sense in allowing neg lower bound
+           dVal  = sqrt(dVal2);     % dVal2 may be negative; safeguard
+%          dVal  = max(sigma,dVal); % Don't allow lower bnd lower than sigma
+           data.dVal = dVal;
+        end
         
     catch
         err = lasterror;
@@ -386,7 +387,7 @@ while 1
         lambdaHist = [lambdaHist, -g * data.rNorm];
     else
         fHist = [fHist, f]; % needed for secant method
-        dHist = [dHist, dualSol];
+        dHist = [dHist, dVal];
     end
     
     
@@ -408,7 +409,9 @@ while 1
             else
                 dtau = tauHist(end) - tauHist(end - 1);
                 slope = (dHist(end) - fHist(end - 1))/dtau; % using dual solution
-                tau = tau - (dHist(end) - sigma)/(slope); %using dual solution
+                step  = - (dHist(end) - sigma) / slope;
+                assert(step > 0);
+                tau = tau + step; %using dual solution
             end
         otherwise
             err('unknown root finding method')
@@ -566,7 +569,7 @@ end % function funObjective
 
 
 % ----------------------------------------------------------------------
-function [stat,data] = funCallbackInexactSecant(x,data)
+function [stat,data] = funCallbackInexactSecant(~,data)
 % ----------------------------------------------------------------------
 
 % Default output
@@ -578,21 +581,17 @@ if ~isempty(data.Atr)
     gap   = data.r'*(data.r - data.b) + data.tau*gNorm;
     rGap  = abs(gap) / max(1,data.f);
     
-    tau    = data.tau;
-    tauOld = data.tauOld;
-    fOld   = data.fOld;
-    dualSol = data.dualSol;
+    tau    = data.tau;    % correct for the current subproblem
+    tauOld = data.tauOld; % previous subproblem
+    dVal   = dualObjVal(data.b, data.r, data.Atr, tau);
+    sigma  = data.sigma;
     
-    
-    
-    if (rGap <= 1e-5*(tau - tauOld)) && (dualSol <= fOld)
+    if (rGap <= 1e-5*(tau - tauOld)) && (dVal >= sigma)
         stat = 1;
     end
 end
 
-
 end % function funCallbackInexactSecant
-
 
 % ----------------------------------------------------------------------
 function [stat,data] = funCallbackSecant(x,data)
@@ -611,7 +610,7 @@ if ~isempty(data.Atr)
     tauOld = data.tauOld;
     
     
-    if rGap <= 1e-5*(tau - tauOld)
+    if rGap <= 1e-10
         stat = 1;
     end
 end
@@ -637,5 +636,11 @@ if ~isempty(data.Atr)
     end
 end
 
-
 end % function funCallbackNewton
+
+% ----------------------------------------------------------------------
+function dVal = dualObjVal(b, r, Atr, tau)
+% ----------------------------------------------------------------------
+    dVal = norm(b)^2 - norm(r - b)^2 - 2*tau*norm(Atr, inf);   
+end
+% ----------------------------------------------------------------------

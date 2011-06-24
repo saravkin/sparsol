@@ -23,7 +23,7 @@ REVISION = REVISION(11:end-1);
 DATE     = DATE(35:end-3);
 
 % Ouch! Tic-safe toc
-try, t0 = toc; catch, tic, t0 = toc; end;
+try t0 = toc; catch, tic, t0 = toc; end;
 
 %----------------------------------------------------------------------
 % Check arguments. 
