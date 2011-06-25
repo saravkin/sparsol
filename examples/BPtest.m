@@ -10,7 +10,7 @@ tau = norm(x0,1);
 options.lassoOpts.optTol = 1e-10;
 options.lassoOpts.verbosity = 0;
 options.tolerance = 1e-7*norm(b);
-    
+
 %% Exact Newton
 options.rootFinder = 'newton';
 [xNewton,info] = gbpdn(A, b, 0, 1e-8, [], options); % Find BP sol'n.
@@ -25,3 +25,5 @@ fprintf('Target tau = %15.7e\n', tau);
 options.rootFinder = 'isecant';
 [xInexactSecant,info] = gbpdn(A, b, 0, 1e-8, [], options); % Find BP sol'n.
 fprintf('Target tau = %15.7e\n', tau);
+
+

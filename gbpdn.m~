@@ -58,10 +58,14 @@ function [x,info] = gbpdn(A,b,tau,sigma,x,options)
 %        .solver       1   Spectral projected gradient (SPG) = default
 %                      2   Projected quadratic Newton (PQN)
 %        .lassoOpts
-%        .rootFinder   newton -> use newton's method (default)
-%                      secant -> use exact secant method (fixed precision
-%                      solving)
-%                      isecant -> use inexact secant method (variable precision)
+%        .rootFinder   newton ->    use newton's method (default)
+%                      secant ->    use exact secant method (fixed precision
+%                                   solving)
+%                      isecant ->   use inexact secant method (variable precision)
+%        .primal       lsq     ->   minimize 0.5*||Ax-b||^2
+%                      huber   ->   minimize huber(Ax - b)
+%        .hparaM       Huber Threshold parameter (default 1)
+%        .hparaT       Huber Scale parameter (default 1)
 %
 % AUTHORS
 % =======
@@ -134,7 +138,10 @@ options = setOptions(options, ...
     'kappa'       ,       [] , ...
     'kappa_polar' ,       [] , ...
     'lassoOpts'   , struct() , ...
-    'rootFinder'  ,  'newton' ...
+    'rootFinder'  ,  'newton', ...
+    'primal'      ,  'lsq'   , ...
+    'hparaM'      ,       1  , ...
+    'hparaT'      ,       1    ...
     );
 
 % Make tolerance two sided if needed.
@@ -189,13 +196,22 @@ nProjections =  0;
 timeMatProd  =  0;
 timeProject  =  0;
 timeTotal    =  0;
-bNorm        = norm(b,2);
+switch options.primal
+    case{'lsq'}
+        bNorm        = norm(b,2);
+        fHist        = [0.5*bNorm^2]; % needed for secant method
+    case{'huber'}
+        hparaM = options.hparaM;
+        hparaT = options.hparaT;
+        fHist        = hubers(b, hparaM, hparaT);
+        bNorm        = sqrt(2*hubers(b, hparaM, hparaT)); % CHANGED
+end
+
 maxMatvec    = options.maxMatvec;
 maxRuntime   = options.maxRuntime;
 f            = -1; % Objective (needed when dealing with matvec error)
 tauHist      = [tau];
 lambdaHist   = [];
-fHist        = [0.5*bNorm^2]; % needed for secant method
 dHist        = []; % needed for secant method
 
 % Determine problem size. (May need nProdA and nProdAt)
@@ -232,6 +248,9 @@ data.Aprod       = @Aprod;
 data.kappa_polar = options.kappa_polar;
 data.iter        = 0; % needed for secant callback
 data.dVal        = 0; % needed for secant callback
+data.primal      = options.primal;
+data.hparaM      = options.hparaM;
+data.hparaT      = options.hparaT;
 
 
 usingNewton = strcmp(options.rootFinder, 'newton'); % for newton-only options
@@ -258,13 +277,15 @@ switch options.solver
             'iterations',   1e5, ...
             'optTol'    ,  1e-6);
         lassoOpts.prefix     = [options.prefix, '  >'];
-               
+        
         funLasso = @pqnLasso;
         solver   = 'PQN Solver';
         
     otherwise
         error('Unknown solver in options.');
 end
+
+
 
 switch options.rootFinder
     case {'newton'}
@@ -313,6 +334,8 @@ else
 end
 
 
+
+
 % ----------------------------------------------------------------------
 % Quick exit if sigma >= ||b||.  Set tau = 0 to short-circuit the loop.
 % ----------------------------------------------------------------------
@@ -333,18 +356,25 @@ while 1
         data.sigma  = sigma;
         funProject  = @(z) project(z,tau);
         lassoOpts.maxRuntime = maxRuntime - (toc - t0);
-        [x,info,data] = funLasso(@funObjective,funProject,x,lassoOpts,data);
-        f = 0.5*data.rNorm^2; %SASHA: replaced scale
+        
+        switch options.primal
+            case{'lsq'}
+                [x,info,data] = funLasso(@funObjectiveLsq,funProject,x,lassoOpts,data);
+            case{'huber'}
+                [x,info,data] = funLasso(@funObjectiveHuber,funProject,x,lassoOpts,data);
+            otherwise
+                error('Unknown primal');
+        end
+        
+        f = data.f;
         
         if usingNewton || iter == 1
-           g = -options.kappa_polar(data.Atr); % SASHA: deleted /data.rNorm
+            g = -options.kappa_polar(data.Atr); % SASHA: deleted /data.rNorm
         end
         if ~usingNewton
-           dVal2 = dualObjVal(b, data.r, data.Atr, tau);
-           dVal2 = max(0, dVal2);   % No sense in allowing neg lower bound
-           dVal  = sqrt(dVal2);     % dVal2 may be negative; safeguard
-%          dVal  = max(sigma,dVal); % Don't allow lower bnd lower than sigma
-           data.dVal = dVal;
+            dVal = dualObjVal(data);
+            dVal = max(0, dVal);   % No sense in allowing neg lower bound
+            data.dVal = dVal;
         end
         
     catch
@@ -534,7 +564,7 @@ end % function gbpdn
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
 % ----------------------------------------------------------------------
-function [f,varargout] = funObjective(x,varargin)
+function [f,varargout] = funObjectiveLsq(x,varargin)
 % ----------------------------------------------------------------------
 % [f]        = funObjective(x,...)
 % [f,data]   = funObjective(x,...);
@@ -549,7 +579,6 @@ end;
 
 % Compute f
 data.r     = data.b - data.Aprod(x,1);
-data.rNorm = norm(data.r,2);
 data.f     = data.r' * data.r / 2;
 f          = data.f;
 
@@ -566,7 +595,54 @@ if nargout > 1
     varargout{nargout-1} = data;
 end
 
-end % function funObjective
+end % function funObjectiveLsq
+
+
+% ----------------------------------------------------------------------
+function [f,varargout] = funObjectiveHuber(x,varargin)
+% ----------------------------------------------------------------------
+% [f]        = funObjective(x,...)
+% [f,data]   = funObjective(x,...);
+% [f,g,data] = funObjective(x,...);
+
+% Initialize data
+if nargin > 1
+    data = varargin{1};
+else
+    data = struct();
+end;
+
+hparaM = data.hparaM;
+hparaT = data.hparaT;
+
+
+[f r g y] = compHubersHelper(x, Aprod, data.b, data.hparaM, data.hparaT);
+
+%r     = data.b - data.Aprod(x,1);
+%y     = r.*(abs(r) <= (hparaM)) + hparaM*sign(r).*(abs(r) > (hparaM));
+%y     = hparaT.*(r.*(abs(r) <= (hparaM)) + hparaM*sign(r).*(abs(r) > (hparaM)));
+data.r = y;
+
+if(nargout <3)
+  f     = hubers(r, hparaM, hparaT);
+  data.f          = f;
+end
+% Compute gradient (optional)
+if nargout == 3
+    [f g] = hubers(r, hparaM, hparaT);
+    data.f = f;
+    data.Atr     = data.Aprod(g,2);
+    varargout{1} = -data.Atr; % gradient
+else
+    data.Atr = [];
+end
+
+% Output data
+if nargout > 1
+    varargout{nargout-1} = data;
+end
+
+end % function funObjectiveLsq
 
 
 % ----------------------------------------------------------------------
@@ -578,13 +654,11 @@ stat = 0;
 
 % Compute primal dual gap (in quadratic formulation)
 if ~isempty(data.Atr)
-    gNorm = data.kappa_polar(data.Atr);
-    gap   = data.r'*(data.r - data.b) + data.tau*gNorm;
-    rGap  = abs(gap) / max(1,data.f);
     
+    rGap  = gapVal(data);
     tau    = data.tau;    % correct for the current subproblem
     tauOld = data.tauOld; % previous subproblem
-    dVal   = dualObjVal(data.b, data.r, data.Atr, tau);
+    dVal   = dualObjVal(data);
     sigma  = data.sigma;
     
     if (rGap <= 1e-5*(tau - tauOld)) && (dVal >= sigma)
@@ -603,15 +677,11 @@ stat = 0;
 
 % Compute primal dual gap (in quadratic formulation)
 if ~isempty(data.Atr)
-    gNorm = data.kappa_polar(data.Atr);
-    gap   = data.r'*(data.r - data.b) + data.tau*gNorm;
-    rGap  = abs(gap) / max(1,data.f);
-    
-    tau    = data.tau;
-    tauOld = data.tauOld;
     
     
-    if rGap <= 1e-10
+    rGap  = gapVal(data);
+    
+    if (rGap <= 1e-10) && (dVal >= sigma)
         stat = 1;
     end
 end
@@ -628,9 +698,8 @@ stat = 0;
 
 % Compute primal dual gap (in quadratic formulation)
 if ~isempty(data.Atr)
-    gNorm = data.kappa_polar(data.Atr);
-    gap   = data.r'*(data.r - data.b) + data.tau*gNorm;
-    rGap  = abs(gap) / max(1,data.f);
+    
+    rGap  = gapVal(data);
     
     if rGap <= 1e-10 % TODO
         stat = 1;
@@ -640,9 +709,56 @@ end
 end % function funCallbackNewton
 
 % ----------------------------------------------------------------------
-function dVal = dualObjVal(b, r, Atr, tau)
+function dVal = dualObjVal(data)
 % ----------------------------------------------------------------------
-%
-dVal = 0.5*norm(b)^2 - 0.5*norm(r - b)^2 - tau*norm(Atr, inf);   
+% Caution: data.r and Atr are different for Huber case,
+% which is why code is the same
+dVal = data.b'*data.r  - 0.5*norm(data.r)^2 - data.tau*norm(data.Atr, inf);
 end
 % ----------------------------------------------------------------------
+
+function rGap = gapVal(data)
+gNorm = data.kappa_polar(data.Atr);
+
+% SASHA: check if gap really same, after redefinition of Atr, r.
+gap   = data.r'*(data.r - data.b) + data.tau*gNorm;
+rGap  = abs(gap) / max(1,data.f);
+end
+
+function [f y g] = compHubersHelper(x, Aprod, b, hparaM, hparaT)
+
+
+
+M = hparaM;
+T = hparaT;
+
+
+%       HUBER(X) = 0.5*|X|^2   if |X|<=1,
+%                  |X|-0.5  if |X|>=1.
+
+% HUBER(X,M) is the Huber penalty function of halfwidth M, M.^2.*HUBER(X./M).
+%   M must be real and positive.
+
+%       HUBER(X,M,T) = T.*M.^2.*HUBER(X./(T*M)) if T > 0
+%                      +Inf             if T <= 0
+
+
+r = b - Aprod(x,1);
+
+switch(nargout)
+    case {2}
+        f = hubers(r, M, T);
+    case {3}
+        [f gTemp] = hubers(r, M, T);
+        g = -Aprod(gTemp, 2);
+    case {4}
+        [f gTemp] = hubers(r, M, T);
+        g = -Aprod(gTemp, 2);
+        %y         =   r.*(abs(r) <= (M*T)) + T*M^2*sign(r).*(abs(r) > (M*T));
+        y = r.*(abs(r) <= (M)) + M*sign(r).*(abs(r) > (M));
+end
+
+
+
+end
+
