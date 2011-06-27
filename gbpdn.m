@@ -124,12 +124,12 @@ if nargin < 2 || isempty(b) || isempty(A)
     error('At least two arguments are required');
 end
 
-defTol  = 1e-5 * norm(b,2);
+defTol = 1e-5*norm(b,2);
 options = setOptions(options, ...
     'fid'         ,        1 , ...
     'verbosity'   ,        1 , ...
     'prefix'      ,       '' , ...  % Prefix for formatting output
-    'iterations'  ,       100 , ...
+    'iterations'  ,      100 , ...
     'tolerance'   ,   defTol , ...
     'maxMatvec'   ,      Inf , ...
     'maxRuntime'  ,      Inf , ...
@@ -210,9 +210,11 @@ end
 maxMatvec    = options.maxMatvec;
 maxRuntime   = options.maxRuntime;
 f            = -1; % Objective (needed when dealing with matvec error)
-tauHist      = [tau];
+tauHist      = tau;
+tauOld       = -1; % Implies tau-tauOld=0-tauOld=1 on first itn.
 lambdaHist   = [];
 dHist        = []; % needed for secant method
+rGapTol      = 1;  % subproblem accuracy
 
 % Determine problem size. (May need nProdA and nProdAt)
 explicit = ~(isa(A,'function_handle'));
@@ -252,15 +254,9 @@ data.primal      = options.primal;
 data.hparaM      = options.hparaM;
 data.hparaT      = options.hparaT;
 
-
 usingNewton = strcmp(options.rootFinder, 'newton'); % for newton-only options
 
 % Choose solver and set options
-
-
-
-
-
 switch options.solver
     case 1,
         lassoOpts = setOptions(options.lassoOpts, ...
@@ -316,9 +312,10 @@ printf(' %-22s: %8.2e      %-22s: %s\n'   ,'Two-norm of b',bNorm,'Solver',solver
 % ----------------------------------------------------------------------
 % Set log format and output header
 if options.verbosity ~= 0
-    logB = ' %4d  %13.7e  %13.7e  %7d  %-30s\n';
-    logH = '%4s  %-13s  %-13s  %7s  %-30s';
-    logS = sprintf(logH,'Iter','Objective','Parameter','Min Its','MinExit');
+    logB = ' %4d  %13.7e  %13.7e  %6d  %10.4e  %10.4e  %-30s\n';
+    logH = '%4s  %-13s  %-13s  %6s  %10s  %10s  %-30s';
+    logS = sprintf(logH,'Iter','Objective','Parameter','MinIts',...
+       'rGapTol','rGap','MinExit');
     printf('\n');
     
     if options.verbosity == 1
@@ -333,9 +330,6 @@ else
     logB = '';
 end
 
-
-
-
 % ----------------------------------------------------------------------
 % Quick exit if sigma >= ||b||.  Set tau = 0 to short-circuit the loop.
 % ----------------------------------------------------------------------
@@ -349,11 +343,14 @@ end
 while 1
     % Evaluate Pareto function and compute gradient
     try
-        data.iter   = iter;
-        data.tauOld = tauHist(end);
-        data.fOld   = fHist(end);
-        data.tau    = tau;
-        data.sigma  = sigma;
+        data.iter    = iter;
+        data.tauOld  = tauHist(end);
+        data.fOld    = fHist(end);
+        data.tau     = tau;
+        data.sigma   = sigma;
+        rGapTol = 0.99*min(1,rGapTol*(tau - tauOld));
+        rGapTol = max(1e-1*options.tolerance(1), rGapTol);
+        data.rGapTol = rGapTol;
         funProject  = @(z) project(z,tau);
         lassoOpts.maxRuntime = maxRuntime - (toc - t0);
         
@@ -390,7 +387,7 @@ while 1
     end
     
     % Output log
-    printf(logB,iter,f,tau,info.iter,info.statMsg);
+    printf(logB,iter,f,tau,info.iter,rGapTol,gapVal(data),info.statMsg);
     
     % Check exit conditions
     if (toc - t0) >= maxRuntime
@@ -411,8 +408,9 @@ while 1
     end
     if ~isempty(stat), break; end;
     
-    % Take Newton step.
-    tauHist    = [tauHist, tau];
+    % Update tao
+    tauHist = [tauHist, tau];
+    tauOld  = tau;
     
     if(usingNewton)
         lambdaHist = [lambdaHist, -g]; %SASHA: got rid of *rNorm
@@ -656,13 +654,12 @@ stat = 0;
 % Compute primal dual gap (in quadratic formulation)
 if ~isempty(data.Atr)
     
-    rGap  = gapVal(data);
-    tau    = data.tau;    % correct for the current subproblem
-    tauOld = data.tauOld; % previous subproblem
+    rGap   = gapVal(data);
     dVal   = dualObjVal(data);
     sigma  = data.sigma;
+    rGapTol = data.rGapTol;
     
-    if (rGap <= 1e-5*(tau - tauOld)) && (dVal >= sigma)
+    if rGap <= rGapTol  &&  dVal >= sigma
         stat = 1;
     end
 end

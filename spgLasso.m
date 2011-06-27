@@ -203,8 +203,7 @@ while 1
        end
 
        
-    catch % Detect function evaluation limit error
-       err = lasterror;
+    catch err % Detect function evaluation limit error
        if strcmp(err.identifier,'SPG:MaximumFunEval')
          stat = EXIT_FUNEVAL_LIMIT;
          iter = iter - 1;
