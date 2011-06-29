@@ -352,7 +352,7 @@ while 1
         data.sigma   = sigma;
 %       rGapTol = 0.99*min(1,rGapTol*(tau - tauOld));
 %       TODO: make this work
-        rGapTol = 0.99*min(1,-rGapTol*(f/slope));
+        rGapTol = 0.99*min(1,rGapTol*(abs(f/slope))); % abs in case iter==1
         rGapTol = max(1e-1*options.tolerance(1), rGapTol);
         data.rGapTol = rGapTol;
         funProject  = @(z) project(z,tau);
