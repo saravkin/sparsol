@@ -210,9 +210,10 @@ end
 maxMatvec    = options.maxMatvec;
 maxRuntime   = options.maxRuntime;
 f            = -1; % Objective (needed when dealing with matvec error)
+slope        =  1; % Needed for inexact secant method
 tauHist      = tau;
 tauOld       = -1; % Implies tau-tauOld=0-tauOld=1 on first itn.
-lambdaHist   = [];
+slopeHist   = [];
 dHist        = []; % needed for secant method
 rGapTol      = 1;  % subproblem accuracy
 
@@ -253,6 +254,7 @@ data.dVal        = 0; % needed for secant callback
 data.primal      = options.primal;
 data.hparaM      = options.hparaM;
 data.hparaT      = options.hparaT;
+
 
 usingNewton = strcmp(options.rootFinder, 'newton'); % for newton-only options
 
@@ -315,7 +317,7 @@ if options.verbosity ~= 0
     logB = ' %4d  %13.7e  %13.7e  %6d  %10.4e  %10.4e  %-30s\n';
     logH = '%4s  %-13s  %-13s  %6s  %10s  %10s  %-30s';
     logS = sprintf(logH,'Iter','Objective','Parameter','MinIts',...
-       'rGapTol','rGap','MinExit');
+        'rGapTol','rGap','MinExit');
     printf('\n');
     
     if options.verbosity == 1
@@ -348,7 +350,9 @@ while 1
         data.fOld    = fHist(end);
         data.tau     = tau;
         data.sigma   = sigma;
-        rGapTol = 0.99*min(1,rGapTol*(tau - tauOld));
+%       rGapTol = 0.99*min(1,rGapTol*(tau - tauOld));
+%       TODO: make this work
+        rGapTol = 0.99*min(1,-rGapTol*(f/slope));
         rGapTol = max(1e-1*options.tolerance(1), rGapTol);
         data.rGapTol = rGapTol;
         funProject  = @(z) project(z,tau);
@@ -368,11 +372,9 @@ while 1
         if usingNewton || iter == 1
             g = -options.kappa_polar(data.Atr); % SASHA: deleted /data.rNorm
         end
-        if ~usingNewton
-            dVal = dualObjVal(data);
-            dVal = max(0, dVal);   % No sense in allowing neg lower bound
-            data.dVal = dVal;
-        end
+        dVal = dualObjVal(data);
+        dVal = max(0, dVal);   % No sense in allowing neg lower bound
+        data.dVal = dVal;
         
     catch
         err = lasterror;
@@ -408,25 +410,21 @@ while 1
     end
     if ~isempty(stat), break; end;
     
-    % Update tao
+    % Update tau
     tauHist = [tauHist, tau];
     tauOld  = tau;
-    
-    if(usingNewton)
-        lambdaHist = [lambdaHist, -g]; %SASHA: got rid of *rNorm
-    else
-        fHist = [fHist, f]; % needed for secant method
-        dHist = [dHist, dVal];
-    end
-    
+    fHist = [fHist, f]; % needed for secant method
+    dHist = [dHist, dVal];
     
     switch options.rootFinder
         case{'newton'}
             tau  = tau - (f - sigma) / g;
+            slope = -g;
         case{'secant'}
             if(iter == 1)
                 tau  = tau - (f - sigma) / g;
-            else
+                slope = -g;
+             else
                 dtau = tauHist(end) - tauHist(end - 1);
                 slope = (fHist(end) - fHist(end - 1))/dtau;
                 tau = tau - (fHist(end) - sigma)/(slope);
@@ -435,6 +433,7 @@ while 1
         case{'isecant'}
             if(iter == 1)
                 tau  = tau - (f - sigma) / g;
+                slope = -g;
             else
                 dtau = tauHist(end) - tauHist(end - 1);
                 slope = (dHist(end) - fHist(end - 1))/dtau; % using dual solution
@@ -445,6 +444,8 @@ while 1
         otherwise
             err('unknown root finding method')
     end
+    slopeHist = [slopeHist, slope];
+
     iter = iter + 1;
     
 end
@@ -468,7 +469,7 @@ info.nProdA       = nProdA;
 info.nProdAt      = nProdAt;
 info.nProjections = nProjections;
 info.tauHist      = [tauHist, tau];
-info.lambdaHist   = [lambdaHist, -g]; %SASHA: got rid of *data.rNorm
+info.slopeHist   = [slopeHist, -g]; %SASHA: got rid of *data.rNorm
 
 % Print final output.
 switch (stat)
@@ -621,17 +622,17 @@ hparaT = data.hparaT;
 %data.r = y;
 
 if(nargout <3)
-   [f y] = compHubersHelper(x, data.Aprod, data.b, data.hparaM, data.hparaT);
-   data.f = f;
-   data.r = y;
+    [f y] = compHubersHelper(x, data.Aprod, data.b, data.hparaM, data.hparaT);
+    data.f = f;
+    data.r = y;
 end
 % Compute gradient (optional)
 if nargout == 3
-   [f y g] = compHubersHelper(x, data.Aprod, data.b, data.hparaM, data.hparaT);
-   data.f = f;
-   data.r = y;
-   data.Atr     = g;
-   varargout{1} = -data.Atr; % gradient
+    [f y g] = compHubersHelper(x, data.Aprod, data.b, data.hparaM, data.hparaT);
+    data.f = f;
+    data.r = y;
+    data.Atr     = g;
+    varargout{1} = -data.Atr; % gradient
 else
     data.Atr = [];
 end
@@ -654,9 +655,9 @@ stat = 0;
 % Compute primal dual gap (in quadratic formulation)
 if ~isempty(data.Atr)
     
-    rGap   = gapVal(data);
-    dVal   = dualObjVal(data);
-    sigma  = data.sigma;
+    rGap    = gapVal(data);
+    dVal    = dualObjVal(data);
+    sigma   = data.sigma;
     rGapTol = data.rGapTol;
     
     if rGap <= rGapTol  &&  dVal >= sigma
