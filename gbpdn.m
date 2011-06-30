@@ -65,8 +65,6 @@ function [x,info] = gbpdn(A,b,tau,sigma,x,options)
 %        .primal       lsq     ->   minimize 0.5*||Ax-b||^2
 %                      huber   ->   minimize huber(Ax - b)
 %        .hparaM       Huber Threshold parameter (default 1)
-%        .hparaT       Huber Scale parameter (default 1)
-%
 % AUTHORS
 % =======
 %  Ewout van den Berg (ewout78@cs.ubc.ca)
@@ -140,8 +138,7 @@ options = setOptions(options, ...
     'lassoOpts'   , struct() , ...
     'rootFinder'  ,  'newton', ...
     'primal'      ,  'lsq'   , ...
-    'hparaM'      ,       1  , ...
-    'hparaT'      ,       1    ...
+    'hparaM'      ,       1   ...
     );
 
 % Make tolerance two sided if needed.
@@ -202,9 +199,8 @@ switch options.primal
         fHist        = [0.5*bNorm^2]; % needed for secant method
     case{'huber'}
         hparaM = options.hparaM;
-        hparaT = options.hparaT;
-        fHist        = hubers(b, hparaM, hparaT);
-        bNorm        = sqrt(2*hubers(b, hparaM, hparaT)); % CHANGED
+        fHist        = huber(b/hparaM); 
+        bNorm        = sqrt(2*fHist); 
 end
 
 maxMatvec    = options.maxMatvec;
@@ -253,7 +249,6 @@ data.iter        = 0; % needed for secant callback
 data.dVal        = 0; % needed for secant callback
 data.primal      = options.primal;
 data.hparaM      = options.hparaM;
-data.hparaT      = options.hparaT;
 
 
 usingNewton = strcmp(options.rootFinder, 'newton'); % for newton-only options
@@ -611,30 +606,24 @@ else
     data = struct();
 end;
 
-hparaM = data.hparaM;
-hparaT = data.hparaT;
 
+M = data.hparaM;
+Aprod = data.Aprod;
+b = data.b; 
 
+r = (b - Aprod(x,1))/M;
+[f yTemp] = huber(r);
+y = M*yTemp;
 
-%r     = data.b - data.Aprod(x,1);
-%y     = r.*(abs(r) <= (hparaM)) + hparaM*sign(r).*(abs(r) > (hparaM));
-%y     = hparaT.*(r.*(abs(r) <= (hparaM)) + hparaM*sign(r).*(abs(r) > (hparaM)));
-%data.r = y;
+data.f = f;
+data.r = y;
 
-if(nargout <3)
-    [f y] = compHubersHelper(x, data.Aprod, data.b, data.hparaM, data.hparaT);
-    data.f = f;
-    data.r = y;
-end
-% Compute gradient (optional)
-if nargout == 3
-    [f y g] = compHubersHelper(x, data.Aprod, data.b, data.hparaM, data.hparaT);
-    data.f = f;
-    data.r = y;
-    data.Atr     = g;
-    varargout{1} = -data.Atr; % gradient
+if(nargout == 3)
+   g = Aprod(y, 2)/M; 
+   data.Atr = g;
+   varargout{1} = -g;
 else
-    data.Atr = [];
+    dadta.Atr = [];
 end
 
 % Output data
@@ -713,7 +702,15 @@ function dVal = dualObjVal(data)
 % ----------------------------------------------------------------------
 % Caution: data.r and Atr are different for Huber case,
 % which is why code is the same
-dVal = data.b'*data.r  - 0.5*norm(data.r)^2 - data.tau*norm(data.Atr, inf);
+switch(data.primal)
+    case{'lsq'}
+        dVal = data.b'*data.r  - 0.5*norm(data.r)^2 - data.tau*data.kappa_polar(data.Atr);
+    case{'huber'}
+        dVal = data.b'*data.r/data.hparaM  - 0.5*norm(data.r)^2 - data.tau*data.kappa_polar(data.Atr);
+
+    otherwise
+    error('unknown primal in dualObjVal');     
+end
 end
 % ----------------------------------------------------------------------
 
@@ -721,39 +718,14 @@ function rGap = gapVal(data)
 gNorm = data.kappa_polar(data.Atr);
 
 % SASHA: check if gap really same, after redefinition of Atr, r.
-gap   = data.r'*(data.r - data.b) + data.tau*gNorm;
+gap   = data.r'*(data.r - data.b/data.hparaM) + data.tau*gNorm;
 rGap  = abs(gap) / max(1,data.f);
 end
 
-function [f y g] = compHubersHelper(x, Aprod, b, hparaM, hparaT)
+function [f y] = huber(r)
 
-
-
-M = hparaM;
-T = hparaT;
-
-
-%       HUBER(X) = 0.5*|X|^2   if |X|<=1,
-%                  |X|-0.5  if |X|>=1.
-
-% HUBER(X,M) is the Huber penalty function of halfwidth M, M.^2.*HUBER(X./M).
-%   M must be real and positive.
-
-%       HUBER(X,M,T) = T.*M.^2.*HUBER(X./(T*M)) if T > 0
-%                      +Inf             if T <= 0
-
-r = b - Aprod(x,1);
-y = r.*(abs(r) <= (M)) + M*sign(r).*(abs(r) > (M));
-
-switch(nargout)
-    case {2}
-        f = hubers(r, M, T);
-    case {3}
-        [f gTemp] = hubers(r, M, T);
-        g = Aprod(gTemp, 2);
+f = 0.5 * sum((r.^2.* abs(r) <=1) + (2*abs(r) - 1).* (abs(r)>1));
+if(nargout == 2)
+    y = r.*(abs(r) <= (1)) + sign(r).*(abs(r) > (1));
 end
-
-
-
 end
-

@@ -10,6 +10,7 @@ tau = norm(x0,1);
 options.lassoOpts.optTol = 1e-10;
 options.lassoOpts.verbosity = 0;
 options.tolerance = 1e-7*norm(b);
+options.primal = 'lsq';
 
 %% Exact Newton
 options.rootFinder = 'newton';
