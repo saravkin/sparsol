@@ -198,9 +198,10 @@ switch options.primal
         bNorm        = norm(b,2);
         fHist        = [0.5*bNorm^2]; % needed for secant method
     case{'huber'}
+        bNorm        = norm(b,2); 
         hparaM = options.hparaM;
         fHist        = huber(b/hparaM); 
-        bNorm        = sqrt(2*fHist); 
+
 end
 
 maxMatvec    = options.maxMatvec;
@@ -612,8 +613,7 @@ Aprod = data.Aprod;
 b = data.b; 
 
 r = (b - Aprod(x,1))/M;
-[f yTemp] = huber(r);
-y = M*yTemp;
+[f y] = huber(r);
 
 data.f = f;
 data.r = y;
@@ -623,7 +623,7 @@ if(nargout == 3)
    data.Atr = g;
    varargout{1} = -g;
 else
-    dadta.Atr = [];
+    data.Atr = [];
 end
 
 % Output data
@@ -703,7 +703,7 @@ function dVal = dualObjVal(data)
 % Caution: data.r and Atr are different for Huber case,
 % which is why code is the same
 switch(data.primal)
-    case{'lsq'}
+    case{'lsq'} 
         dVal = data.b'*data.r  - 0.5*norm(data.r)^2 - data.tau*data.kappa_polar(data.Atr);
     case{'huber'}
         dVal = data.b'*data.r/data.hparaM  - 0.5*norm(data.r)^2 - data.tau*data.kappa_polar(data.Atr);
@@ -714,17 +714,25 @@ end
 end
 % ----------------------------------------------------------------------
 
-function rGap = gapVal(data)
+function rGap = gapVal(data) %SASHA TODO
 gNorm = data.kappa_polar(data.Atr);
 
-% SASHA: check if gap really same, after redefinition of Atr, r.
-gap   = data.r'*(data.r - data.b/data.hparaM) + data.tau*gNorm;
-rGap  = abs(gap) / max(1,data.f);
+switch(data.primal)
+    case{'lsq'}
+        gap   = data.r'*(data.r - data.b/data.hparaM) + data.tau*gNorm;
+    case{'huber'}
+        gap   = data.f - dualObjVal(data);
 end
+   rGap  = abs(gap) / max(1,data.f);
+end
+
+
+% ----------------------------------------------------------------------
+
 
 function [f y] = huber(r)
 
-f = 0.5 * sum((r.^2.* abs(r) <=1) + (2*abs(r) - 1).* (abs(r)>1));
+f = 0.5 * sum((r.^2.* (abs(r) <=1)) + (2*abs(r) - 1).* (abs(r)>1));
 if(nargout == 2)
     y = r.*(abs(r) <= (1)) + sign(r).*(abs(r) > (1));
 end
