@@ -303,6 +303,8 @@ printf(' GBPDN  v.%s (%s)\n', REVISION, DATE);
 printf(' %s\n',repmat('=',1,80));
 printf(' %-22s: %8i %4s %-22s: %8i\n','No. rows',m,'','No. columns',n);
 printf(' %-22s: %8.2e      %-22s: %s\n'   ,'Two-norm of b',bNorm,'Solver',solver);
+printf(' %-22s: %8s %4s %-22s: %8s\n','Root finder',options.rootFinder,'','SingleTau',int2str(singleTau));
+printf(' %-22s: %8.2e %4s %-22s: %8.2e\n','tau',tau,'','sigma',sigma);
 
 
 % ----------------------------------------------------------------------
@@ -372,8 +374,7 @@ while 1
         dVal = max(0, dVal);   % No sense in allowing neg lower bound
         data.dVal = dVal;
         
-    catch
-        err = lasterror;
+    catch err
         if strcmp(err.identifier,'GBPDN:MaximumMatvec')
             stat = EXIT_MATVEC_LIMIT;
             iter = iter - 1;
@@ -719,7 +720,7 @@ gNorm = data.kappa_polar(data.Atr);
 
 switch(data.primal)
     case{'lsq'}
-        gap   = data.r'*(data.r - data.b/data.hparaM) + data.tau*gNorm;
+        gap   = data.r'*(data.r - data.b) + data.tau*gNorm;
     case{'huber'}
         gap   = data.f - dualObjVal(data);
 end
@@ -732,8 +733,9 @@ end
 
 function [f y] = huber(r)
 
-f = 0.5 * sum((r.^2.* (abs(r) <=1)) + (2*abs(r) - 1).* (abs(r)>1));
-if(nargout == 2)
-    y = r.*(abs(r) <= (1)) + sign(r).*(abs(r) > (1));
+curvy = abs(r) <= 1;
+f = 0.5 * sum((r.^2 .* curvy) + (2*abs(r) - 1) .* ~curvy);
+if nargout == 2
+    y = r .* curvy + sign(r) .* ~curvy;
 end
 end

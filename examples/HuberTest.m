@@ -31,21 +31,12 @@ fprintf('Target tau = %15.7e\n', tau);
 options.primal = 'huber';
 %options.hparaM = 1e-3;
 %options.hparaT = 1e2;
-options.hparaM = .1;
-sigma = 1e-3;
+options.hparaM = .005;
+sigma = 1e-2;
 options.rootFinder = 'newton';
 [xHuber,info] = gbpdn(A, b, 0, sigma, [], options); 
 fprintf('Target tau = %15.7e\n', tau);
 
-
-options.rootFinder = 'secant';
-[xHuber,info] = gbpdn(A, b, 0, sigma, [], options); 
-fprintf('Target tau = %15.7e\n', tau);
-
-
-options.rootFinder = 'isecant';
-[xHuber,info] = gbpdn(A, b, 0, sigma, [], options); 
-fprintf('Target tau = %15.7e\n', tau);
 
 
 figure(1)
