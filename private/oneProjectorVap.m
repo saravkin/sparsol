@@ -89,7 +89,9 @@ s = sign(b);
 small = abs(b) <= eps;
 bs    = b.*small;
 
-b = abs(b).*(abs(b)>eps);
+bMod = abs(b) - eps; % subtract off epsilon from abs values
+b = abs(bMod).*(abs(bMod) > 0); % kill entries smaller than eps (bs)
+
 
 % Perform the projection
 if isscalar(d)
@@ -101,5 +103,5 @@ else
   [x(idx),itn] = oneProjectorMex(b(idx),d(idx),tau);
 end
 
-% Restore signs in x and add small values back in
-x = x.*s + bs; 
+% Restore signs in x, add eps back to large entries, and add small entries back in
+x =(1-small).*(x+eps).*s + bs ; 
