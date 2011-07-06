@@ -27,17 +27,18 @@ options.primal = 'huber';
 %options.hparaT = 1e2;
 options.hparaM = .1;
 sigma = 1e-3;
+options.exact = 1;
 options.rootFinder = 'newton';
 [xHuberNewton,info] = gbpdn(A, b, 0, sigma, [], options); 
 fprintf('Target tau = %15.7e\n', tau);
 
 
+options.exact = 1;
 options.rootFinder = 'secant';
 [xHuberSecant,info] = gbpdn(A, b, 0, sigma, [], options); 
 fprintf('Target tau = %15.7e\n', tau);
 
-
-options.rootFinder = 'isecant';
+options.exact = 2;
 [xHuberISecant,info] = gbpdn(A, b, 0, sigma, [], options); 
 fprintf('Target tau = %15.7e\n', tau);
 

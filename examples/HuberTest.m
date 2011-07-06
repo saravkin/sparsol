@@ -11,6 +11,7 @@ options.lassoOpts.optTol = 1e-10;
 options.lassoOpts.verbosity = 0;
 options.tolerance = 1e-7*norm(b);
 options.primal = 'lsq';
+options.exact  = 1;
 
 %s = 3;
 %Err = zeros(m, 1); % outliers

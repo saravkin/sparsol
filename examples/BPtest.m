@@ -7,23 +7,27 @@ b  = A*x0 + 0.005 * randn(m,1);
 tau = norm(x0,1);
 
 %% Subproblem options
-options.lassoOpts.optTol = 1e-10;
+options.lassoOpts.optTol = 0;
+options.solver = 1;     %1 for spg,  2 for pqn
 options.lassoOpts.verbosity = 0;
 options.tolerance = 1e-7*norm(b);
 options.primal = 'lsq';
 
 %% Exact Newton
 options.rootFinder = 'newton';
+options.exact = 1;
 [xNewton,info] = gbpdn(A, b, 0, 1e-8, [], options); % Find BP sol'n.
 fprintf('Target tau = %15.7e\n', tau);
 
 %% Exact secant
 options.rootFinder = 'secant';
+options.exact = 1;
 [xSecant,info] = gbpdn(A, b, 0, 1e-8, [], options); % Find BP sol'n.
 fprintf('Target tau = %15.7e\n', tau);
 
 %% Inexact secant
-options.rootFinder = 'isecant';
+options.rootFinder = 'secant';
+options.exact = 2;
 [xInexactSecant,info] = gbpdn(A, b, 0, 1e-8, [], options); % Find BP sol'n.
 fprintf('Target tau = %15.7e\n', tau);
 
