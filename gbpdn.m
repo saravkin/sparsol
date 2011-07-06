@@ -390,8 +390,7 @@ while 1
         dVal = max(0, dVal);   % No sense in allowing neg lower bound
         data.dVal = dVal;
         
-    catch
-        err
+    catch    err
         if strcmp(err.identifier,'GBPDN:MaximumMatvec')
             stat = EXIT_MATVEC_LIMIT;
             iter = iter - 1;
@@ -679,8 +678,11 @@ if ~isempty(data.Atr)
     sigma   = data.sigma;
     rGapTol = data.rGapTol;
     
-    if   dVal >= sigma &&  data.rGap <= rGapTol %% pGNorm <= rGapTol
-        stat = 1;
+    % sigma must exist
+    if ~isempty(sigma)
+        if  dVal >= sigma &&  data.rGap <= rGapTol %% pGNorm <= rGapTol
+            stat = 1;
+        end
     end
 end
 

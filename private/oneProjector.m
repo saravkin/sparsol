@@ -1,11 +1,11 @@
-function [x,itn] = oneProjector(b,d,tau)
+function [x,itn] = oneProjector(b,d,tau, epsilon)
 % ONEPROJECTOR  Projects b onto the weighted one-norm ball of radius tau
 %
 %    [X,ITN] = ONEPROJECTOR(B,TAU) returns the orthogonal projection
 %    of the vector b onto the one-norm ball of radius tau. The return
 %    vector X which solves the problem
 %
-%            minimize  ||b-x||_2  st  ||x||_1 <= tau.
+%            minimize  ||b-x||_2  st  vapnik(x) <= tau.
 %               x
 %
 %    [X,ITN] = ONEPROJECTOR(B,D,TAU) returns the orthogonal
