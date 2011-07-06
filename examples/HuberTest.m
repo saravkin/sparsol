@@ -11,6 +11,7 @@ options.lassoOpts.optTol = 1e-10;
 options.lassoOpts.verbosity = 0;
 options.tolerance = 1e-7*norm(b);
 options.primal = 'lsq';
+options.exact  = 1;
 
 %s = 3;
 %Err = zeros(m, 1); % outliers
@@ -31,21 +32,12 @@ fprintf('Target tau = %15.7e\n', tau);
 options.primal = 'huber';
 %options.hparaM = 1e-3;
 %options.hparaT = 1e2;
-options.hparaM = .1;
-sigma = 1e-3;
+options.hparaM = .005;
+sigma = 1e-2;
 options.rootFinder = 'newton';
 [xHuber,info] = gbpdn(A, b, 0, sigma, [], options); 
 fprintf('Target tau = %15.7e\n', tau);
 
-
-options.rootFinder = 'secant';
-[xHuber,info] = gbpdn(A, b, 0, sigma, [], options); 
-fprintf('Target tau = %15.7e\n', tau);
-
-
-options.rootFinder = 'isecant';
-[xHuber,info] = gbpdn(A, b, 0, sigma, [], options); 
-fprintf('Target tau = %15.7e\n', tau);
 
 
 figure(1)

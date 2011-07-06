@@ -61,7 +61,8 @@ function [x,info] = gbpdn(A,b,tau,sigma,x,options)
 %        .rootFinder   newton ->    use newton's method (default)
 %                      secant ->    use exact secant method (fixed precision
 %                                   solving)
-%                      isecant ->   use inexact secant method (variable precision)
+%        .exact        1   Do exact solve on all subproblems
+%                      2   Do approximate solves on subproblems
 %        .primal       lsq     ->   minimize 0.5*||Ax-b||^2
 %                      huber   ->   minimize huber(Ax - b)
 %        .hparaM       Huber Threshold parameter (default 1)
@@ -137,6 +138,7 @@ options = setOptions(options, ...
     'kappa_polar' ,       [] , ...
     'lassoOpts'   , struct() , ...
     'rootFinder'  ,  'newton', ...
+    'exact'       ,       1  , ...
     'primal'      ,  'lsq'   , ...
     'hparaM'      ,       1   ...
     );
@@ -198,10 +200,10 @@ switch options.primal
         bNorm        = norm(b,2);
         fHist        = [0.5*bNorm^2]; % needed for secant method
     case{'huber'}
-        bNorm        = norm(b,2); 
+        bNorm        = norm(b,2);
         hparaM = options.hparaM;
-        fHist        = huber(b/hparaM); 
-
+        fHist        = huber(b/hparaM);
+        
 end
 
 maxMatvec    = options.maxMatvec;
@@ -252,6 +254,8 @@ data.primal      = options.primal;
 data.hparaM      = options.hparaM;
 
 
+
+
 usingNewton = strcmp(options.rootFinder, 'newton'); % for newton-only options
 
 % Choose solver and set options
@@ -280,18 +284,18 @@ switch options.solver
 end
 
 
-
-switch options.rootFinder
-    case {'newton'}
-        lassoOpts.callback   = @funCallbackNewton;
-    case{'secant'}
-        lassoOpts.callback   = @funCallbackSecant;
-        
-    case{'isecant'}
-        lassoOpts.callback   = @funCallbackInexactSecant;
-    otherwise
-        error('Unknown root finder');
-end
+lassoOpts.callback = @funCallback;
+% switch options.rootFinder
+%     case {'newton'}
+%         lassoOpts.callback   = @funCallbackNewton;
+%     case{'secant'}
+%         lassoOpts.callback   = @funCallbackSecant;
+%
+%     case{'isecant'}
+%         lassoOpts.callback   = @funCallbackInexactSecant;
+%     otherwise
+%         error('Unknown root finder');
+% end
 
 
 %----------------------------------------------------------------------
@@ -303,6 +307,8 @@ printf(' GBPDN  v.%s (%s)\n', REVISION, DATE);
 printf(' %s\n',repmat('=',1,80));
 printf(' %-22s: %8i %4s %-22s: %8i\n','No. rows',m,'','No. columns',n);
 printf(' %-22s: %8.2e      %-22s: %s\n'   ,'Two-norm of b',bNorm,'Solver',solver);
+printf(' %-22s: %8s %4s %-22s: %8s\n','Root finder',options.rootFinder,'','SingleTau',int2str(singleTau));
+printf(' %-22s: %8.2e %4s %-22s: %8.2e\n','tau',tau,'','sigma',sigma);
 
 
 % ----------------------------------------------------------------------
@@ -346,12 +352,20 @@ while 1
         data.fOld    = fHist(end);
         data.tau     = tau;
         data.sigma   = sigma;
-%       rGapTol = 0.99*min(1,rGapTol*(tau - tauOld));
-%       TODO: make this work
-        rGapTol = 0.99*min(1,rGapTol*(abs(f/slope))); % abs in case iter==1
-        rGapTol = max(1e-1*options.tolerance(1), rGapTol);
+        %       rGapTol = 0.99*min(1,rGapTol*(tau - tauOld));
+        %       TODO: make this work
+        switch(options.exact)
+            case{1}
+                rGapTol = options.tolerance(1);
+            case{2}
+                rGapTol = 0.99*min(1,rGapTol*(abs(f/slope))); % abs in case iter==1
+                rGapTol = max(1e-1*options.tolerance(1), rGapTol);
+            otherwise
+                error('unknown exactness criteria');
+        end
         data.rGapTol = rGapTol;
         funProject  = @(z) project(z,tau);
+        data.project = funProject; % needed for new exit criteria
         lassoOpts.maxRuntime = maxRuntime - (toc - t0);
         
         switch options.primal
@@ -372,8 +386,7 @@ while 1
         dVal = max(0, dVal);   % No sense in allowing neg lower bound
         data.dVal = dVal;
         
-    catch
-        err = lasterror;
+    catch err
         if strcmp(err.identifier,'GBPDN:MaximumMatvec')
             stat = EXIT_MATVEC_LIMIT;
             iter = iter - 1;
@@ -416,24 +429,33 @@ while 1
         case{'newton'}
             tau  = tau - (f - sigma) / g;
             slope = -g;
-        case{'secant'}
-            if(iter == 1)
-                tau  = tau - (f - sigma) / g;
-                slope = -g;
-             else
-                dtau = tauHist(end) - tauHist(end - 1);
-                slope = (fHist(end) - fHist(end - 1))/dtau;
-                tau = tau - (fHist(end) - sigma)/(slope);
-            end
+            %         case{'secant'}
+            %             if(iter == 1)
+            %                 tau  = tau - (f - sigma) / g;
+            %                 slope = -g;
+            %              else
+            %                 dtau = tauHist(end) - tauHist(end - 1);
+            %                 slope = (fHist(end) - fHist(end - 1))/dtau;
+            %                 tau = tau - (fHist(end) - sigma)/(slope);
+            %             end
             
-        case{'isecant'}
+        case{'secant'}
             if(iter == 1)
                 tau  = tau - (f - sigma) / g;
                 slope = -g;
             else
                 dtau = tauHist(end) - tauHist(end - 1);
-                slope = (dHist(end) - fHist(end - 1))/dtau; % using dual solution
-                step  = - (dHist(end) - sigma) / slope;
+                switch(options.exact)
+                    case{1}
+                        slope = (fHist(end) - fHist(end - 1))/dtau; % using dual solution
+                        step  = - (fHist(end) - sigma) / slope;
+                    case{2}
+                        slope = (dHist(end) - fHist(end - 1))/dtau; % using dual solution
+                        step  = - (dHist(end) - sigma) / slope;
+                    otherwise
+                        error('unknown exact criteria');
+                       
+                end
                 assert(step > 0);
                 tau = tau + step; %using dual solution
             end
@@ -441,7 +463,7 @@ while 1
             err('unknown root finding method')
     end
     slopeHist = [slopeHist, slope];
-
+    
     iter = iter + 1;
     
 end
@@ -610,7 +632,7 @@ end;
 
 M = data.hparaM;
 Aprod = data.Aprod;
-b = data.b; 
+b = data.b;
 
 r = (b - Aprod(x,1))/M;
 [f y] = huber(r);
@@ -619,9 +641,9 @@ data.f = f;
 data.r = y;
 
 if(nargout == 3)
-   g = Aprod(y, 2)/M; 
-   data.Atr = g;
-   varargout{1} = -g;
+    g = Aprod(y, 2)/M;
+    data.Atr = g;
+    varargout{1} = -g;
 else
     data.Atr = [];
 end
@@ -635,7 +657,7 @@ end % function funObjectiveLsq
 
 
 % ----------------------------------------------------------------------
-function [stat,data] = funCallbackInexactSecant(x,data)
+function [stat,data] = funCallback(x,data)
 % ----------------------------------------------------------------------
 
 % Default output
@@ -644,12 +666,15 @@ stat = 0;
 % Compute primal dual gap (in quadratic formulation)
 if ~isempty(data.Atr)
     
-    rGap    = gapVal(data);
+    data.rGap    = gapVal(data);
+    %pGNorm  = projGradNorm(data, x);
+    
+    
     dVal    = dualObjVal(data);
     sigma   = data.sigma;
     rGapTol = data.rGapTol;
     
-    if rGap <= rGapTol  &&  dVal >= sigma
+    if   dVal >= sigma &&  data.rGap <= rGapTol %% pGNorm <= rGapTol
         stat = 1;
     end
 end
@@ -657,45 +682,49 @@ end
 end % function funCallbackInexactSecant
 
 % ----------------------------------------------------------------------
-function [stat,data] = funCallbackSecant(x,data)
+%function [stat,data] = funCallbackExact(x,data)
 % ----------------------------------------------------------------------
 
 % Default output
-stat = 0;
+%stat = 0;
 
 % Compute primal dual gap (in quadratic formulation)
-if ~isempty(data.Atr)
-    
-    
-    rGap  = gapVal(data);
-    
-    dVal   = dualObjVal(data);
-    if (rGap <= 1e-10) && (dVal >= data.sigma)
-        stat = 1;
-    end
-end
+%if ~isempty(data.Atr)
 
 
-end % function funCallbackSecant
+%   data.rGap  = gapVal(data);
+%pGNorm  = projGradNorm(data, x);
 
-% ----------------------------------------------------------------------
-function [stat,data] = funCallbackNewton(x,data)
-% ----------------------------------------------------------------------
 
-% Default output
-stat = 0;
+%    dVal   = dualObjVal(data);
+%    if      data.rGap <= 1e-10 %%pGNorm <= 1e-10
 
-% Compute primal dual gap (in quadratic formulation)
-if ~isempty(data.Atr)
-    
-    rGap  = gapVal(data);
-    
-    if rGap <= 1e-10 % TODO
-        stat = 1;
-    end
-end
+%        stat = 1;
+%    end
+%end
 
-end % function funCallbackNewton
+
+%end % function funCallbackSecant
+
+% % ----------------------------------------------------------------------
+% function [stat,data] = funCallbackNewton(x,data)
+% % ----------------------------------------------------------------------
+%
+% % Default output
+% stat = 0;
+%
+% % Compute primal dual gap (in quadratic formulation)
+% if ~isempty(data.Atr)
+%
+%     data.rGap  = gapVal(data);
+%     pGNorm  = projGradNorm(data, x);
+%
+%     if data.rGap <= 1e-10 %% pGNorm <= 1e-10
+%         stat = 1;
+%     end
+% end
+%
+% end % function funCallbackNewton
 
 % ----------------------------------------------------------------------
 function dVal = dualObjVal(data)
@@ -703,37 +732,47 @@ function dVal = dualObjVal(data)
 % Caution: data.r and Atr are different for Huber case,
 % which is why code is the same
 switch(data.primal)
-    case{'lsq'} 
+    case{'lsq'}
         dVal = data.b'*data.r  - 0.5*norm(data.r)^2 - data.tau*data.kappa_polar(data.Atr);
     case{'huber'}
         dVal = data.b'*data.r/data.hparaM  - 0.5*norm(data.r)^2 - data.tau*data.kappa_polar(data.Atr);
-
+        
     otherwise
-    error('unknown primal in dualObjVal');     
+        error('unknown primal in dualObjVal');
 end
 end
 % ----------------------------------------------------------------------
 
-function rGap = gapVal(data) %SASHA TODO
+function rGap = gapVal(data)
 gNorm = data.kappa_polar(data.Atr);
 
 switch(data.primal)
     case{'lsq'}
-        gap   = data.r'*(data.r - data.b/data.hparaM) + data.tau*gNorm;
+        gap   = data.r'*(data.r - data.b) + data.tau*gNorm;
     case{'huber'}
         gap   = data.f - dualObjVal(data);
 end
-   rGap  = abs(gap) / max(1,data.f);
+rGap  = abs(gap) / max(1,data.f);
 end
 
+% ----------------------------------------------------------------------
+
+function pGNorm = projGradNorm(data, x)
+
+dx     = data.project(x - data.Atr) - x;
+dxNorm = norm(dx,inf);
+pGNorm = dxNorm;
+
+end
 
 % ----------------------------------------------------------------------
 
 
 function [f y] = huber(r)
 
-f = 0.5 * sum((r.^2.* (abs(r) <=1)) + (2*abs(r) - 1).* (abs(r)>1));
-if(nargout == 2)
-    y = r.*(abs(r) <= (1)) + sign(r).*(abs(r) > (1));
+curvy = abs(r) <= 1;
+f = 0.5 * sum((r.^2 .* curvy) + (2*abs(r) - 1) .* ~curvy);
+if nargout == 2
+    y = r .* curvy + sign(r) .* ~curvy;
 end
 end
