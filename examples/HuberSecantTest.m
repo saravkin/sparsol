@@ -7,6 +7,7 @@ b  = A*x0 + 0.005 * randn(m,1);
 tau = norm(x0,1);
 
 %% Subproblem options
+options.vapnikEps = 1e-7;
 options.lassoOpts.optTol = 1e-10;
 options.lassoOpts.verbosity = 0;
 options.tolerance = 1e-7*norm(b);
