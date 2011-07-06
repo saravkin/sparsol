@@ -86,6 +86,9 @@ end
 
 % Get sign of b and set to absolute values
 s = sign(b);
+small = abs(b) <= eps;
+bs    = b.*small;
+
 b = abs(b).*(abs(b)>eps);
 
 % Perform the projection
@@ -98,5 +101,5 @@ else
   [x(idx),itn] = oneProjectorMex(b(idx),d(idx),tau);
 end
 
-% Restore signs in x
-x = x.*s;
+% Restore signs in x and add small values back in
+x = x.*s + bs; 
