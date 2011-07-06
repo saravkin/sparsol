@@ -66,6 +66,7 @@ function [x,info] = gbpdn(A,b,tau,sigma,x,options)
 %        .primal       lsq     ->   minimize 0.5*||Ax-b||^2
 %                      huber   ->   minimize huber(Ax - b)
 %        .hparaM       Huber Threshold parameter (default 1)
+%        .vapnikEps    Vapnik epsilon parameter, default 0.
 % AUTHORS
 % =======
 %  Ewout van den Berg (ewout78@cs.ubc.ca)
@@ -140,9 +141,11 @@ options = setOptions(options, ...
     'rootFinder'  ,  'newton', ...
     'exact'       ,       1  , ...
     'primal'      ,  'lsq'   , ...
-    'hparaM'      ,       1   ...
+    'hparaM'      ,       1  , ...
+    'vapnikEps'   ,       0    ...
     );
 
+vapnikEps = options.vapnikEps;
 % Make tolerance two sided if needed.
 if isscalar(options.tolerance)
     options.tolerance = [1 1] * options.tolerance;
@@ -157,9 +160,9 @@ if any(flags) && ~all(flags)
         'project) should be given or none.']);
 end
 if all(flags)
-    options.project     = @(x,tau) NormL1_project(x,1,tau);
+    options.project     = @(x,tau) NormL1_project(x,1,tau, vapnikEps);
     options.kappa       = @(x)     NormL1_primal(x,1);
-    options.kappa_polar = @(x)     NormL1_dual(x,1);
+    options.kappa_polar = @(x)     NormL1_dual(x,1); 
 end
 
 % Match tau and x0.
@@ -247,12 +250,13 @@ data = struct();
 data.b           = b;
 data.r           = []; % For dealing with matvec error in first call
 data.Aprod       = @Aprod;
+data.kappa       = options.kappa;
 data.kappa_polar = options.kappa_polar;
 data.iter        = 0; % needed for secant callback
 data.dVal        = 0; % needed for secant callback
 data.primal      = options.primal;
 data.hparaM      = options.hparaM;
-
+data.vapnikEps   = vapnikEps; % vapnik parameter
 
 
 
@@ -386,7 +390,8 @@ while 1
         dVal = max(0, dVal);   % No sense in allowing neg lower bound
         data.dVal = dVal;
         
-    catch err
+    catch
+        err
         if strcmp(err.identifier,'GBPDN:MaximumMatvec')
             stat = EXIT_MATVEC_LIMIT;
             iter = iter - 1;
@@ -666,7 +671,7 @@ stat = 0;
 % Compute primal dual gap (in quadratic formulation)
 if ~isempty(data.Atr)
     
-    data.rGap    = gapVal(data);
+    data.rGap    = (data.f - dualObjVal(data))/max(1,data.f);
     %pGNorm  = projGradNorm(data, x);
     
     
@@ -733,25 +738,35 @@ function dVal = dualObjVal(data)
 % which is why code is the same
 switch(data.primal)
     case{'lsq'}
-        dVal = data.b'*data.r  - 0.5*norm(data.r)^2 - data.tau*data.kappa_polar(data.Atr);
+        M = 1;
     case{'huber'}
-        dVal = data.b'*data.r/data.hparaM  - 0.5*norm(data.r)^2 - data.tau*data.kappa_polar(data.Atr);
-        
+        M = data.hparaM;
     otherwise
         error('unknown primal in dualObjVal');
 end
+b = data.b;
+r = data.r;
+tau = data.tau;
+Atr = data.Atr;
+kappa = data.kappa;
+kappa_polar = data.kappa_polar;
+vapnikEps = data.vapnikEps;
+
+dVal = b'*r/M - 0.5*norm(r)^2 - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr);
 end
 % ----------------------------------------------------------------------
 
 function rGap = gapVal(data)
-gNorm = data.kappa_polar(data.Atr);
 
-switch(data.primal)
-    case{'lsq'}
-        gap   = data.r'*(data.r - data.b) + data.tau*gNorm;
-    case{'huber'}
-        gap   = data.f - dualObjVal(data);
-end
+gap = data.f - dualObjVal(data);
+%gNorm = data.kappa_polar(data.Atr);
+
+% switch(data.primal)
+%     case{'lsq'}
+%         gap   = data.r'*(data.r - data.b) + data.tau*gNorm + data.vapnikEps*data.kappa(data.Atr); % for vapnik
+%     case{'huber'}
+%         gap   = data.f - dualObjVal(data);
+% end
 rGap  = abs(gap) / max(1,data.f);
 end
 
