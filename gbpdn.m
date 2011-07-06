@@ -641,11 +641,14 @@ b = data.b;
 r = (b - Aprod(x,1))/M;
 [f y] = huber(r);
 
+f = M^2*f; % SASHA: Scaled by M^2
+y = M*y;   % SASHA: scaled by M
+
 data.f = f;
 data.r = y;
 
 if(nargout == 3)
-    g = Aprod(y, 2)/M;
+    g = Aprod(y, 2);  %SASHA: removed /M
     data.Atr = g;
     varargout{1} = -g;
 else
@@ -754,7 +757,7 @@ kappa = data.kappa;
 kappa_polar = data.kappa_polar;
 vapnikEps = data.vapnikEps;
 
-dVal = b'*r/M - 0.5*norm(r)^2 - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr);
+dVal = (b'*r - 0.5*norm(r)^2 - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr)); %SASHA: removed /M in b'*r
 end
 % ----------------------------------------------------------------------
 
