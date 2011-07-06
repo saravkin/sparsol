@@ -13,21 +13,20 @@ options.lassoOpts.verbosity = 0;
 options.tolerance = 1e-7*norm(b);
 options.primal = 'lsq';
 
-%s = 3;
-%Err = zeros(m, 1); % outliers
-%pErr = randperm(m);
-%Err(pErr(1:s)) = randn(s, 1);
-%b = b + Err;
+s = 5; % number of outliers
+Err = zeros(m, 1); % outliers
+pErr = randperm(m);
+Err(pErr(1:s)) = .5*randn(s, 1); % outliers are 100 times the size
+b = b + Err;
 
-sigma = 1e-6;
+sigma = 1e-2;
 
 
 %%
 options.primal = 'huber';
 %options.hparaM = 1e-3;
 %options.hparaT = 1e2;
-options.hparaM = .1;
-sigma = 1e-3;
+options.hparaM = .005;
 options.exact = 1;
 options.rootFinder = 'newton';
 [xHuberNewton,info] = gbpdn(A, b, 0, sigma, [], options); 
