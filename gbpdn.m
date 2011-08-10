@@ -757,7 +757,7 @@ kappa = data.kappa;
 kappa_polar = data.kappa_polar;
 vapnikEps = data.vapnikEps;
 
-dVal = (b'*r - 0.5*norm(r)^2 - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr)); %SASHA: removed /M in b'*r
+dVal = b'*r - 0.5*norm(r)^2 - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr); %SASHA: removed /M in b'*r
 end
 % ----------------------------------------------------------------------
 
