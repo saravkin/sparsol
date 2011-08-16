@@ -4,9 +4,9 @@ m = 120; n = 512; k = 20; % m rows, n cols, k nonzeros.
 %dWeight = 1./(1:n).^1;
 %dWeight = dWeight';
 
-p = randperm(n); x0 = zeros(n,1); x0(p(1:k)) = sign(randn(k,1));
-signalNoise = 0.05*sign(randn(n, 1));
-x0 = x0 + signalNoise; % add some random noise
+pL = randperm(n); xL = zeros(n,1); xL(pL(1:k)) =     sign(randn(k,1));
+pS = randperm(n); xS = zeros(n,1); xS(pS(1:k)) = .05*sign(randn(k,1));
+x0 = xL + xS;
 
 A  = randn(m,n); [Q,R] = qr(A',0);  A = Q';
 b  = A*x0 + 0.005 * randn(m,1);
@@ -28,36 +28,21 @@ options.exact = 1;
 fprintf('Target tau = %15.7e\n', tau);
 
 %% Exact Newton, vapnik parameter = 
-options.vapnikEps = 0.05;
+options.vapnikEps = 0.01;
 [xVapnik,info] = gbpdn(A, b, 0, sigma, [], options); % Find BP sol'n.
 fprintf('Target tau = %15.7e\n', tau);
-
-xSupport = xVapnik.*(abs(xVapnik) > options.vapnikEps);
-noiseEst = xVapnik.*(~xSupport);
-
-bEst = b - A*noiseEst; % compute estimate of 'noisy measurement'
-
-options.vapnikEps = 0.0;
-[xL1Final,info] = gbpdn(A, bEst, 0, sigma, [], options); % Find BP sol'n.
 
 
 %x0mod = x0.*(abs(x0) > options.vapnikEps);
 %xL1mod = xL1(1:n).*(abs(x0) > options.vapnikEps);
 %xVapnikmod = xVapnik(1:n).*(abs(x0)>options.vapnikEps);
-x0mod = x0;
-xVapnikmod = xVapnik;
-xL1mod = xL1;
 
 figure(1)
-plot(1:n, x0mod, 1:n, xL1mod -2, 1:n, xVapnikmod + 2);legend('true', 'l1', 'vapnik')
+plot(1:n, x0, 1:n, xL1 -2, 1:n, xVapnik + 2);legend('true', 'l1', 'vapnik')
 
 
 
 figure(2)
 plot(1:m, b - A*x0, 1:m, b - A*xL1(1:n)+.05, 1:m, b - A*xVapnik(1:n)-.05);legend('True Outliers', 'l1 residuals', 'Vapnik Residuals')
-
-
-figure(3)
-plot(1:n, x0mod, 1:n, xL1mod -2, 1:n, xL1Final + 2);legend('true', 'l1', 'vapnik')
 
 

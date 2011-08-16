@@ -101,16 +101,17 @@ else
 end
 
 % compute the difference
-diff = s.*b - s.*x; 
+% projection preserves signs of b and b-x
+diff = b - x; % all positive
 
 % compute the sign of the difference
-sDiff = sign(diff);
+%sDiff = sign(diff);
 
 % compute epsilon-allowed difference
-epsDiff = min(eps, abs(diff));
+epsDiff = min(eps, diff);
 
-% Restore signs in x
-x = x.*s;
+% Restore signs in x, after adding allowable difference
+x = (x + epsDiff).*s;
 
 % add allowable difference back in
-x = x + sDiff.*epsDiff;
+%x = x + sDiff.*epsDiff;
