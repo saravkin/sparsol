@@ -63,8 +63,9 @@ function [x,info] = gbpdn(A,b,tau,sigma,x,options)
 %                                   solving)
 %        .exact        1   Do exact solve on all subproblems
 %                      2   Do approximate solves on subproblems
-%        .primal       lsq     ->   minimize 0.5*||Ax-b||^2
+%        .primal       lsq     ->   minimize 0.5*||Ax-b||_2^2
 %                      huber   ->   minimize huber(Ax - b)
+%                      l1      ->   minimuze ||Ax - b||_1
 %        .hparaM       Huber Threshold parameter (default 1)
 %        .vapnikEps    Vapnik epsilon parameter, default 0.
 % AUTHORS
@@ -162,7 +163,7 @@ end
 if all(flags)
     options.project     = @(x,tau) NormL1_project(x,1,tau, vapnikEps);
     options.kappa       = @(x)     NormL1_primal(x,1);
-    options.kappa_polar = @(x)     NormL1_dual(x,1); 
+    options.kappa_polar = @(x)     NormL1_dual(x,1);
 end
 
 % Match tau and x0.
@@ -198,15 +199,16 @@ nProjections =  0;
 timeMatProd  =  0;
 timeProject  =  0;
 timeTotal    =  0;
+
+bNorm        = norm(b,2);
 switch options.primal
-    case{'lsq'}
-        bNorm        = norm(b,2);
+    case{'lsq'}      
         fHist        = [0.5*bNorm^2]; % needed for secant method
     case{'huber'}
-        bNorm        = norm(b,2);
         hparaM = options.hparaM;
         fHist        = huber(b/hparaM);
-        
+    case{'l1'}
+        fHist = norm(b, 1);
 end
 
 maxMatvec    = options.maxMatvec;
@@ -377,6 +379,8 @@ while 1
                 [x,info,data] = funLasso(@funObjectiveLsq,funProject,x,lassoOpts,data);
             case{'huber'}
                 [x,info,data] = funLasso(@funObjectiveHuber,funProject,x,lassoOpts,data);
+            case{'l1'}
+                [x,info,data] = funLasso(@funObjectiveL1,funProject,x,lassoOpts,data);
             otherwise
                 error('Unknown primal');
         end
@@ -458,7 +462,7 @@ while 1
                         step  = - (dHist(end) - sigma) / slope;
                     otherwise
                         error('unknown exact criteria');
-                       
+                        
                 end
                 assert(step > 0);
                 tau = tau + step; %using dual solution
@@ -664,6 +668,50 @@ end % function funObjectiveLsq
 
 
 % ----------------------------------------------------------------------
+function [f,varargout] = funObjectiveL1(x,varargin)
+% ----------------------------------------------------------------------
+% [f]        = funObjective(x,...)
+% [f,data]   = funObjective(x,...);
+% [f,g,data] = funObjective(x,...);
+
+% Initialize data
+if nargin > 1
+    data = varargin{1};
+else
+    data = struct();
+end;
+
+
+Aprod   = data.Aprod;
+b       = data.b;
+
+r       = (b - Aprod(x,1));
+f       = norm(r, 1);
+y       = r.*(r > 0) -r.*(r < 0); % at 0, take 0.
+
+data.f  = f;
+data.r  = y; % this is probably right, but have to check
+
+
+if(nargout == 3)
+    g = Aprod(y, 2);
+    data.Atr = g;
+    varargout{1} = -g;
+else
+    data.Atr = [];
+end
+
+% Output data
+if nargout > 1
+    varargout{nargout-1} = data;
+end
+
+end % function funObjectiveLsq
+
+
+
+
+% ----------------------------------------------------------------------
 function [stat,data] = funCallback(x,data)
 % ----------------------------------------------------------------------
 
@@ -741,14 +789,6 @@ function dVal = dualObjVal(data)
 % ----------------------------------------------------------------------
 % Caution: data.r and Atr are different for Huber case,
 % which is why code is the same
-switch(data.primal)
-    case{'lsq'}
-        M = 1;
-    case{'huber'}
-        M = data.hparaM;
-    otherwise
-        error('unknown primal in dualObjVal');
-end
 b = data.b;
 r = data.r;
 tau = data.tau;
@@ -757,7 +797,16 @@ kappa = data.kappa;
 kappa_polar = data.kappa_polar;
 vapnikEps = data.vapnikEps;
 
-dVal = b'*r - 0.5*norm(r)^2 - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr); %SASHA: removed /M in b'*r
+switch(data.primal)
+    case{'lsq', 'huber'}
+        dVal = b'*r - 0.5*norm(r)^2 - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr); %SASHA: removed /M in b'*r
+    case{'l1'}
+        dVal = b'*r - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr); %SASHA: removed /M in b'*r
+    otherwise
+        error('unknown primal in dualObjVal');
+end
+
+%dVal = b'*r - 0.5*norm(r)^2 - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr); %SASHA: removed /M in b'*r
 end
 % ----------------------------------------------------------------------
 
