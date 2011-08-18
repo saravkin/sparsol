@@ -68,6 +68,8 @@ function [x,info] = gbpdn(A,b,tau,sigma,x,options)
 %                      l1      ->   minimuze ||Ax - b||_1
 %        .hparaM       Huber Threshold parameter (default 1)
 %        .vapnikEps    Vapnik epsilon parameter, default 0.
+%        .L1Eps        Approximation parameter for L1 objective, default 0.
+%
 % AUTHORS
 % =======
 %  Ewout van den Berg (ewout78@cs.ubc.ca)
@@ -143,7 +145,8 @@ options = setOptions(options, ...
     'exact'       ,       1  , ...
     'primal'      ,  'lsq'   , ...
     'hparaM'      ,       1  , ...
-    'vapnikEps'   ,       0    ...
+    'vapnikEps'   ,       0  , ...
+    'L1Eps'       ,       0    ...
     );
 
 vapnikEps = options.vapnikEps;
@@ -202,7 +205,7 @@ timeTotal    =  0;
 
 bNorm        = norm(b,2);
 switch options.primal
-    case{'lsq'}      
+    case{'lsq'}
         fHist        = [0.5*bNorm^2]; % needed for secant method
     case{'huber'}
         hparaM = options.hparaM;
@@ -258,9 +261,11 @@ data.iter        = 0; % needed for secant callback
 data.dVal        = 0; % needed for secant callback
 data.primal      = options.primal;
 data.hparaM      = options.hparaM;
-data.vapnikEps   = vapnikEps; % vapnik parameter
-
-
+data.vapnikEps   = options.vapnikEps; % vapnik parameter
+data.L1Eps       = options.L1Eps;
+if(strcmp(options.primal,'l1'))
+    data.res         = b; % needed for L1 norm
+end
 
 usingNewton = strcmp(options.rootFinder, 'newton'); % for newton-only options
 
@@ -385,7 +390,12 @@ while 1
                 error('Unknown primal');
         end
         
-        f = data.f;
+        switch(options.primal)
+            case 'l1'
+                f = data.f;
+            otherwise
+                f = data.f;
+        end
         
         if usingNewton || iter == 1
             g = -options.kappa_polar(data.Atr); % SASHA: deleted /data.rNorm
@@ -425,6 +435,7 @@ while 1
             stat = EXIT_OPTIMAL;
         end
     end
+   
     if ~isempty(stat), break; end;
     
     % Update tau
@@ -455,16 +466,23 @@ while 1
                 dtau = tauHist(end) - tauHist(end - 1);
                 switch(options.exact)
                     case{1}
-                        slope = (fHist(end) - fHist(end - 1))/dtau; % using dual solution
+                        df    =  fHist(end) - fHist(end - 1);
+                        slope = df/dtau; % using dual solution
                         step  = - (fHist(end) - sigma) / slope;
                     case{2}
-                        slope = (dHist(end) - fHist(end - 1))/dtau; % using dual solution
+                        df    = dHist(end) - fHist(end - 1);
+                        slope = df/dtau; % using dual solution
                         step  = - (dHist(end) - sigma) / slope;
                     otherwise
                         error('unknown exact criteria');
                         
                 end
-                assert(step > 0);
+                if( step < 0 || slope > 0)
+                    fprintf('step: %14f\n slope: %14f\n', step, slope);
+                    step = 0;
+                    stat = EXIT_OPTIMAL;
+                end
+                assert(step >= 0);
                 tau = tau + step; %using dual solution
             end
         otherwise
@@ -667,8 +685,61 @@ end
 end % function funObjectiveLsq
 
 
+
 % ----------------------------------------------------------------------
 function [f,varargout] = funObjectiveL1(x,varargin)
+% ----------------------------------------------------------------------
+% [f]        = funObjective(x,...)
+% [f,data]   = funObjective(x,...);
+% [f,g,data] = funObjective(x,...);
+
+% Initialize data
+if nargin > 1
+    data = varargin{1};
+else
+    data = struct();
+end;
+
+eps     = data.L1Eps;
+Aprod   = data.Aprod;
+b       = data.b;
+
+r       = (b - Aprod(x,1));
+r2      = r.*r;
+r2e     = r2 + eps;
+sqr2e   = sqrt(r2e);
+
+f       = sum(r2./sqr2e);
+fL1       = norm(r, 1);
+
+y       = (r > 0) -(r < 0); % at 0, take 0. Dual variable unchanged.
+
+data.f  = f;
+data.fL1 = fL1;
+data.r  = y; % this is probably right, but have to check
+
+
+if(nargout == 3)
+    preGrad = (2*(r.*(r2e)) - (r2.*r))./(r2e.*sqr2e);
+    grad = Aprod(preGrad, 2);
+    %grad = Aprod(2*r - (r2.*r)./r2e, 2); % gradient for approximation
+    g = Aprod(y, 2); % subradient for objective
+    data.Atr = g;
+    varargout{1} = -grad;
+else
+    data.Atr = [];
+end
+
+% Output data
+if nargout > 1
+    varargout{nargout-1} = data;
+end
+
+end % function funObjectiveLsq
+
+
+% ----------------------------------------------------------------------
+function [f,varargout] = funObjectiveL1Pure(x,varargin)
 % ----------------------------------------------------------------------
 % [f]        = funObjective(x,...)
 % [f,data]   = funObjective(x,...);
@@ -687,11 +758,11 @@ b       = data.b;
 
 r       = (b - Aprod(x,1));
 f       = norm(r, 1);
-y       = r.*(r > 0) -r.*(r < 0); % at 0, take 0.
+y       = (r > 0) -(r < 0); % at 0, take 0.
 
 data.f  = f;
 data.r  = y; % this is probably right, but have to check
-
+data.res = r; % needed now.
 
 if(nargout == 3)
     g = Aprod(y, 2);
@@ -721,7 +792,14 @@ stat = 0;
 % Compute primal dual gap (in quadratic formulation)
 if ~isempty(data.Atr)
     
-    data.rGap    = (data.f - dualObjVal(data))/max(1,data.f);
+    switch(data.primal)
+        case{'l1'}
+            data.rGap = (data.f - dualObjVal(data))/max(1,data.f);
+        otherwise
+            data.rGap    = (data.f - dualObjVal(data))/max(1,data.f);
+    end
+    
+    
     %pGNorm  = projGradNorm(data, x);
     
     
@@ -801,7 +879,7 @@ switch(data.primal)
     case{'lsq', 'huber'}
         dVal = b'*r - 0.5*norm(r)^2 - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr); %SASHA: removed /M in b'*r
     case{'l1'}
-        dVal = b'*r - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr); %SASHA: removed /M in b'*r
+        dVal = b'*r - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr);
     otherwise
         error('unknown primal in dualObjVal');
 end
