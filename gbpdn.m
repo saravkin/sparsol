@@ -710,6 +710,7 @@ r2e     = r2 + eps;
 sqr2e   = sqrt(r2e);
 
 f       = sum(r2./sqr2e);
+
 fL1       = norm(r, 1);
 
 y       = (r > 0) -(r < 0); % at 0, take 0. Dual variable unchanged.
@@ -721,8 +722,8 @@ data.r  = y; % this is probably right, but have to check
 
 if(nargout == 3)
     preGrad = (2*(r.*(r2e)) - (r2.*r))./(r2e.*sqr2e);
+    %preGrad = 2*r - (r2.*r)./r2e;
     grad = Aprod(preGrad, 2);
-    %grad = Aprod(2*r - (r2.*r)./r2e, 2); % gradient for approximation
     g = Aprod(y, 2); % subradient for objective
     data.Atr = g;
     varargout{1} = -grad;
