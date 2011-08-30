@@ -1,5 +1,8 @@
 function [ok] = SecantTestBP(drawplot)
 
+if(nargin < 1)
+    drawplot = 0;
+end
 ok = 1;
 reset(RandStream.getDefaultStream);
 

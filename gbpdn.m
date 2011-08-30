@@ -479,8 +479,8 @@ while 1
                 end
                 if( step < 0 || slope > 0)
                     fprintf('step: %14f\n slope: %14f\n', step, slope);
-                    step = 0;
-                    stat = EXIT_OPTIMAL;
+                    %step = 0;
+                    %stat = EXIT_OPTIMAL;
                 end
                 assert(step >= 0);
                 tau = tau + step; %using dual solution
