@@ -387,7 +387,6 @@ while 1
             case{'l1'}
                 [x,info,data] = funLasso(@funObjectiveL1,funProject,x,lassoOpts,data);
             case{'l1pure'}
-                data.A = A;
                 [x,info,data] = linCvx(x,data);
 
             otherwise
@@ -754,7 +753,6 @@ else
 end;
 
 Aprod   =   data.Aprod; 
-A       =   data.A;
 tau     =   data.tau;
 b       =   data.b;
 
@@ -764,7 +762,7 @@ cvx_begin
 cvx_quiet(true)
 
 variable xs(psize)
-minimize( norm( A*xs - b, 1 ) )
+minimize( norm( Aprod(xs, 1) - b, 1 ) )
 subject to
 norm(xs, 1) <= tau;
 
