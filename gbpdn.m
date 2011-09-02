@@ -210,7 +210,7 @@ switch options.primal
     case{'huber'}
         hparaM = options.hparaM;
         fHist        = huber(b/hparaM);
-    case{'l1'}
+    case{'l1', 'l1pure'}
         fHist = norm(b, 1);
 end
 
@@ -386,6 +386,10 @@ while 1
                 [x,info,data] = funLasso(@funObjectiveHuber,funProject,x,lassoOpts,data);
             case{'l1'}
                 [x,info,data] = funLasso(@funObjectiveL1,funProject,x,lassoOpts,data);
+            case{'l1pure'}
+                data.A = A;
+                [x,info,data] = linCvx(x,data);
+
             otherwise
                 error('Unknown primal');
         end
@@ -739,6 +743,66 @@ end
 end % function funObjectiveLsq
 
 
+function [x, varargout] = linCvx(x, varargin)
+% uses cvx to solve 
+% min ||Ax - b||_1 s.t. ||x||_1 \leq tau
+
+if nargin > 1
+    data = varargin{1};
+else
+    data = struct();
+end;
+
+Aprod   =   data.Aprod; 
+A       =   data.A;
+tau     =   data.tau;
+b       =   data.b;
+
+psize = size(x);
+
+cvx_begin
+cvx_quiet(true)
+
+variable xs(psize)
+minimize( norm( A*xs - b, 1 ) )
+subject to
+norm(xs, 1) <= tau;
+
+cvx_end
+
+x = xs;
+
+r            = (b - Aprod(x,1));
+data.f       = norm(r, 1);
+data.r       = (r > 0) -(r < 0); % at 0, take 0.
+
+g = Aprod(data.r, 2);
+data.Atr = g;
+
+if(nargout == 3)
+    info = struct();
+    info.iter          = 0;
+    info.stat          = 1;
+    info.timeTotal     = 0;
+    info.timeProject   = 0;
+    info.timeFunEval   = 0;
+    info.nFunctionEval = 0;
+    info.nGradientEval = 0;
+    info.nProjections  = 0;
+    info.statMsg = 'Optimal solution found';
+    
+    varargout{1} = info;
+end
+
+% Output data
+if nargout > 1
+    varargout{nargout-1} = data;
+end
+
+
+end
+
+
 % ----------------------------------------------------------------------
 function [f,varargout] = funObjectiveL1Pure(x,varargin)
 % ----------------------------------------------------------------------
@@ -879,7 +943,7 @@ vapnikEps = data.vapnikEps;
 switch(data.primal)
     case{'lsq', 'huber'}
         dVal = b'*r - 0.5*norm(r)^2 - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr); %SASHA: removed /M in b'*r
-    case{'l1'}
+    case{'l1', 'l1pure'}
         dVal = b'*r - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr);
     otherwise
         error('unknown primal in dualObjVal');
