@@ -145,6 +145,7 @@ options = setOptions(options, ...
     'exact'       ,       1  , ...
     'primal'      ,  'lsq'   , ...
     'hparaM'      ,       1  , ...
+    'hparaReg'    ,       0  , ...
     'vapnikEps'   ,       0  , ...
     'L1Eps'       ,       0    ...
     );
@@ -209,7 +210,7 @@ switch options.primal
         fHist        = [0.5*bNorm^2]; % needed for secant method
     case{'huber'}
         hparaM = options.hparaM;
-        fHist        = huber(b/hparaM);
+        fHist        = hubers(b, hparaM);
     case{'l1', 'l1pure'}
         fHist = norm(b, 1);
 end
@@ -256,11 +257,12 @@ data.b           = b;
 data.r           = []; % For dealing with matvec error in first call
 data.Aprod       = @Aprod;
 data.kappa       = options.kappa;
-data.kappa_polar = options.kappa_polar;
+data.kappa_polar = options.kappa_polar; % this is the same for Huber and L1
 data.iter        = 0; % needed for secant callback
 data.dVal        = 0; % needed for secant callback
 data.primal      = options.primal;
 data.hparaM      = options.hparaM;
+data.hparaReg    = options.hparaReg; % this is the eps. in the regularization huber. 
 data.vapnikEps   = options.vapnikEps; % vapnik parameter
 data.L1Eps       = options.L1Eps;
 if(strcmp(options.primal,'l1'))
@@ -663,14 +665,22 @@ M = data.hparaM;
 Aprod = data.Aprod;
 b = data.b;
 
-r = (b - Aprod(x,1))/M;
-[f y] = huber(r);
+%Old confusing version with rescaling: 
 
-f = M^2*f; % SASHA: Scaled by M^2
-y = M*y;   % SASHA: scaled by M
+    %r = (b - Aprod(x,1))/M;
+    %[f y] = huber(r);
+    %f = M^2*f; % SASHA: Scaled by M^2  
+    %y = M*y;   % SASHA: scaled by M
+    %data.f = f;
+    %data.r = y;
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
+% New less confusing version without rescaling:     
+r = (b - Aprod(x,1));
+[f y] = hubers(r, M, M);
 data.f = f;
 data.r = y;
+
 
 if(nargout == 3)
     g = Aprod(y, 2);  %SASHA: removed /M
@@ -976,13 +986,3 @@ pGNorm = dxNorm;
 end
 
 % ----------------------------------------------------------------------
-
-
-function [f y] = huber(r)
-
-curvy = abs(r) <= 1;
-f = 0.5 * sum((r.^2 .* curvy) + (2*abs(r) - 1) .* ~curvy);
-if nargout == 2
-    y = r .* curvy + sign(r) .* ~curvy;
-end
-end
