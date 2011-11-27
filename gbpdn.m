@@ -66,7 +66,11 @@ function [x,info] = gbpdn(A,b,tau,sigma,x,options)
 %        .primal       lsq     ->   minimize 0.5*||Ax-b||_2^2
 %                      huber   ->   minimize huber(Ax - b)
 %                      l1      ->   minimuze ||Ax - b||_1
+%        .dual         l1      ->   regularization is 1-norm
+%                      vapnik  ->   regularization is Vapnik
+%                      huber   ->   regularization is Huber
 %        .hparaM       Huber Threshold parameter (default 1)
+%        .hparaReg     Huber threshold parameter for regularization
 %        .vapnikEps    Vapnik epsilon parameter, default 0.
 %        .L1Eps        Approximation parameter for L1 objective, default 0.
 %
@@ -144,6 +148,7 @@ options = setOptions(options, ...
     'rootFinder'  ,  'newton', ...
     'exact'       ,       1  , ...
     'primal'      ,  'lsq'   , ...
+    'dual'        ,  'l1'    , ...
     'hparaM'      ,       1  , ...
     'hparaReg'    ,       0  , ...
     'vapnikEps'   ,       0  , ...
@@ -151,6 +156,7 @@ options = setOptions(options, ...
     );
 
 vapnikEps = options.vapnikEps;
+hparaReg  = options.hparaReg;
 % Make tolerance two sided if needed.
 if isscalar(options.tolerance)
     options.tolerance = [1 1] * options.tolerance;
@@ -165,9 +171,26 @@ if any(flags) && ~all(flags)
         'project) should be given or none.']);
 end
 if all(flags)
-    options.project     = @(x,tau) NormL1_project(x,1,tau, vapnikEps);
-    options.kappa       = @(x)     NormL1_primal(x,1);
-    options.kappa_polar = @(x)     NormL1_dual(x,1);
+    switch options.dual
+        case{'l1'}
+            options.project     = @(x,tau) NormL1_project(x,1,tau, 0);
+            options.kappa       = @(x)     NormL1_primal(x,1);
+            options.kappa_polar = @(x)     NormL1_dual(x,1);
+            
+        case{'vapnik'}
+            options.project     = @(x,tau) NormL1_project(x,1,tau, vapnikEps);
+            options.kappa       = @(x)     NormL1_primal(x,1);
+            options.kappa_polar = @(x)     NormL1_dual(x,1);
+            
+        case{'huber'}
+            options.project     = @(x,tau) Huber_project(x,1,tau, hparaReg);
+            options.kappa       = @(x)     hubers(x,hparaReg, 1); % projection Huber
+            options.kappa_polar = @(x)     NormL1_dual(x,1);      % this is the same
+            
+        otherwise
+            error('unknown dual function given');
+    end
+    
 end
 
 % Match tau and x0.
@@ -210,7 +233,7 @@ switch options.primal
         fHist        = [0.5*bNorm^2]; % needed for secant method
     case{'huber'}
         hparaM = options.hparaM;
-        fHist        = hubers(b, hparaM);
+        fHist        = hubers(b, hparaM, hparaM);
     case{'l1', 'l1pure'}
         fHist = norm(b, 1);
 end
@@ -257,10 +280,11 @@ data.b           = b;
 data.r           = []; % For dealing with matvec error in first call
 data.Aprod       = @Aprod;
 data.kappa       = options.kappa;
-data.kappa_polar = options.kappa_polar; % this is the same for Huber and L1
+data.kappa_polar = options.kappa_polar;
 data.iter        = 0; % needed for secant callback
 data.dVal        = 0; % needed for secant callback
 data.primal      = options.primal;
+data.dual        = options.dual;
 data.hparaM      = options.hparaM;
 data.hparaReg    = options.hparaReg; % this is the eps. in the regularization huber. 
 data.vapnikEps   = options.vapnikEps; % vapnik parameter
@@ -402,8 +426,20 @@ while 1
                 f = data.f;
         end
         
-        if usingNewton || iter == 1
-            g = -options.kappa_polar(data.Atr); % SASHA: deleted /data.rNorm
+        if iter == 1
+           g = -options.kappa_polar(data.Atr);
+        end
+        
+        if usingNewton && iter > 1
+            switch(options.dual)
+                case{'l1'}
+                    g = -options.kappa_polar(data.Atr); % SASHA: deleted /data.rNorm
+                        
+                case{'huber'}
+                    g1 = options.kappa_polar(data.Atr);
+                    g2 = norm(data.Atr/hparaReg)/(sqrt(2*tau));
+                    g = -max(g1, g2);            
+            end
         end
         dVal = dualObjVal(data);
         dVal = max(0, dVal);   % No sense in allowing neg lower bound
@@ -948,16 +984,36 @@ kappa = data.kappa;
 kappa_polar = data.kappa_polar;
 vapnikEps = data.vapnikEps;
 
-switch(data.primal)
-    case{'lsq', 'huber'}
-        dVal = b'*r - 0.5*norm(r)^2 - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr); %SASHA: removed /M in b'*r
-    case{'l1', 'l1pure'}
-        dVal = b'*r - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr);
-    otherwise
-        error('unknown primal in dualObjVal');
+switch data.dual
+    case{'l1'}    
+        switch(data.primal)
+            case{'lsq', 'huber'}
+                dVal = b'*r - 0.5*norm(r)^2 - tau*kappa_polar(Atr); 
+            case{'l1', 'l1pure'}
+                dVal = b'*r - tau*kappa_polar(Atr);
+            otherwise
+                error('unknown primal in dualObjVal');
+        end
+        
+    case{'vapnik'}
+        switch(data.primal)
+            case{'lsq', 'huber'}
+                dVal = b'*r - 0.5*norm(r)^2 - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr); 
+            case{'l1', 'l1pure'}
+                dVal = b'*r - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr);
+            otherwise
+                error('unknown primal in dualObjVal');
+        end
+        
+    case{'huber'}    
+        switch(data.primal)
+            case{'huber'}
+                dVal = b'*r - 0.5*norm(r)^2 - 2*tau*kappa_polar(Atr);  
+            otherwise
+                error('unknown primal in dualObjVal');
+        end
 end
 
-%dVal = b'*r - 0.5*norm(r)^2 - tau*kappa_polar(Atr) - vapnikEps*kappa(Atr); %SASHA: removed /M in b'*r
 end
 % ----------------------------------------------------------------------
 
