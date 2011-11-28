@@ -445,7 +445,8 @@ while 1
         dVal = max(0, dVal);   % No sense in allowing neg lower bound
         data.dVal = dVal;
         
-    catch    err
+    catch
+        err
         if strcmp(err.identifier,'GBPDN:MaximumMatvec')
             stat = EXIT_MATVEC_LIMIT;
             iter = iter - 1;

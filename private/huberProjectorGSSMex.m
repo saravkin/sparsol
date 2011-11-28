@@ -67,7 +67,7 @@ function [x,itn] = oneProjectorMex_I(b,tau, eps)
 
    fh = @(alpha)huberDifferTau(alpha, b, eps, tau);
    
-   [c d] = gss(fh,0,norm(b, inf),1e-4,40);
+   [c d] = gss(fh,0,norm(b, inf),1e-12,1000);
    alphaTrue = (c + d)/2;
    
    [differ  x] = huberDifferTau(alphaTrue, b, eps, tau);

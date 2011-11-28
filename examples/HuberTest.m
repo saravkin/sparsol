@@ -42,11 +42,14 @@ fprintf('Target tau = %15.7e\n', tau);
 
 
 figure(1)
-plot(1:n, x0, 1:n, xL2(1:n) -2, 1:n, xHuber(1:n) + 2);legend('true', 'l2', 'huber')
+plot(1:n, x0, 1:n, xL2(1:n) -2, 1:n, xHuber(1:n) + 2, '-k', 'Linewidth', 1.5);
+
+%legend('true', 'l2', 'huber')
 
 
 
 figure(2)
-plot(1:m, b - A*x0, 1:m, b - A*xL2(1:n)+3, 1:m, b - A*xHuber(1:n)-3);legend('True Outliers', 'l2 residuals', 'Huber Residuals')
+plot(1:m, b - A*x0, 1:m, b - A*xL2(1:n)+1.5, 1:m, b - A*xHuber(1:n)-1.5, '-k', 'Linewidth', 2);
+%legend('True Outliers', 'l2 residuals', 'Huber Residuals')
 
 

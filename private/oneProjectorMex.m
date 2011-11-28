@@ -51,7 +51,7 @@ end % function oneProjectorMex
 
 
 % ----------------------------------------------------------------------
-function [x,itn] = oneProjectorMex_I(b,tau)
+function [x,itn,alpha] = oneProjectorMex_I(b,tau)
 % ----------------------------------------------------------------------
 
    % Initialization
@@ -124,7 +124,6 @@ function [x,itn] = oneProjectorMex_D(b,d,tau)
       soft = alpha1;  i = i + 1;
    end
    x(idx(1:i-1)) = b(1:i-1) - d(1:i-1) * max(0,soft);
-
    % Set number of iterations
    itn = i;
 end
