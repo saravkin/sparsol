@@ -177,6 +177,11 @@ if all(flags)
             options.kappa       = @(x)     NormL1_primal(x,1);
             options.kappa_polar = @(x)     NormL1_dual(x,1);
             
+        case{'l1NN'}
+            options.project     = @(x,tau) NormL1NN_project(x,1,tau); 
+            options.kappa       = @(x)     NormL1NN_primal(x,1);
+            options.kappa_polar = @(x)     NormL1NN_dual(x,1);
+
         case{'vapnik'}
             options.project     = @(x,tau) NormL1_project(x,1,tau, vapnikEps);
             options.kappa       = @(x)     NormL1_primal(x,1);
@@ -432,7 +437,7 @@ while 1
         
         if usingNewton && iter > 1
             switch(options.dual)
-                case{'l1'}
+                case{'l1','ll1NN'}
                     g = -options.kappa_polar(data.Atr); % SASHA: deleted /data.rNorm
                         
                 case{'huber'}
@@ -986,7 +991,7 @@ kappa_polar = data.kappa_polar;
 vapnikEps = data.vapnikEps;
 
 switch data.dual
-    case{'l1'}    
+    case{'l1','l1NN'}    
         switch(data.primal)
             case{'lsq', 'huber'}
                 dVal = b'*r - 0.5*norm(r)^2 - tau*kappa_polar(Atr); 
